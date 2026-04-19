@@ -40,6 +40,7 @@ install_base_dependencies() {
 		git \
 		curl \
 		wget \
+		npm \
 		code-oss \
 		jq \
 		ca-certificates \
