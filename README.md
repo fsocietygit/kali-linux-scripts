@@ -1,5 +1,7 @@
 # Kali Linux Scripts
 
+![Banner](images/banner.png)
+
 This repository contains Kali Linux scripts designed to automate the initial configuration and preparation of a Kali Linux environment for penetration testing, security research, and development.
 
 ## Usage
