@@ -233,7 +233,7 @@ themes_and_icons_install() {
             safe_install_packages arc-theme papirus-icon-theme
             ;;
         windows_xp|hacker)
-            safe_install_packages papirus-icon-theme gtk2-engines-murrine gtk2-engines-pixbuf
+            safe_install_packages papirus-icon-theme gtk2-engines gtk2-engines-pixbuf
             local xp_theme_url="https://github.com/B00merang-Project/Windows-XP/archive/refs/heads/master.zip"
             local xp_theme_zip="$themes_dir/windows-xp.zip"
             if download_file "$xp_theme_url" "$xp_theme_zip"; then
