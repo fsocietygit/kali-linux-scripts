@@ -47,6 +47,9 @@ gsettings_available() {
     if ! command_exists gsettings; then
         return 1
     fi
+    if [ -z "${DBUS_SESSION_BUS_ADDRESS-}" ]; then
+        return 1
+    fi
     if ! gsettings writable org.gnome.desktop.interface gtk-theme >/dev/null 2>&1; then
         return 1
     fi
@@ -63,6 +66,20 @@ safe_apt_update() {
     sudo apt-get update -y
 }
 
+package_available() {
+    local pkg="$1"
+
+    if ! command_exists apt-cache; then
+        return 0
+    fi
+
+    if apt-cache policy "$pkg" 2>/dev/null | grep -qE 'Candidate:\s*(none|None)'; then
+        return 1
+    fi
+
+    return 0
+}
+
 safe_install_packages() {
     if ! command_exists apt-get; then
         error "apt-get ist auf diesem System nicht vorhanden."
@@ -73,8 +90,28 @@ safe_install_packages() {
         return 0
     fi
 
-    log "Installiere Pakete: $*"
-    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "$@"
+    local available=()
+    local unavailable=()
+
+    for pkg in "$@"; do
+        if package_available "$pkg"; then
+            available+=("$pkg")
+        else
+            unavailable+=("$pkg")
+        fi
+    done
+
+    if [ "${#unavailable[@]}" -gt 0 ]; then
+        log "Paket(e) nicht verfügbar und werden übersprungen: ${unavailable[*]}"
+    fi
+
+    if [ "${#available[@]}" -eq 0 ]; then
+        log "Keine verfügbaren Pakete zum Installieren."
+        return 0
+    fi
+
+    log "Installiere verfügbare Pakete: ${available[*]}"
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "${available[@]}"
 }
 
 backup_current_setup() {
@@ -128,12 +165,15 @@ install_custom_dependencies() {
     log "Installiere Abhängigkeiten..."
     safe_apt_update
     safe_install_packages \
-        curl wget unzip git picom feh rofi waybar alacritty thunar nitrogen \
+        curl wget unzip git picom feh rofi waybar alacritty thunar variety \
         lxappearance fonts-font-awesome fonts-firacode \
-        fonts-jetbrains-mono ttf-nerd-fonts-symbols \
+        fonts-jetbrains-mono \
         playerctl pulseaudio-utils pavucontrol \
         scrot flameshot arandr brightnessctl \
         network-manager-applet bluez blueman python3-pip
+
+    log "Nitrogen und ttf-nerd-fonts-symbols werden auf Kali-rolling nicht immer angeboten und werden optional übersprungen."
+    log "Variety wird als Kali-kompatibler Hintergrund-Manager installiert, falls verfügbar."
 }
 
 nerd_fonts_install() {
@@ -172,13 +212,17 @@ themes_and_icons_install() {
         corporate)
             safe_install_packages arc-theme papirus-icon-theme
             ;;
-        hacker)
-            safe_install_packages papirus-icon-theme
-            local dracula_theme_url="https://github.com/dracula/gtk/archive/refs/heads/master.zip"
-            local dracula_theme_zip="$themes_dir/dracula.zip"
-            if download_file "$dracula_theme_url" "$dracula_theme_zip"; then
-                extract_zip "$dracula_theme_zip" "$themes_dir"
-                rm -f "$dracula_theme_zip"
+        windows_xp|hacker)
+            safe_install_packages papirus-icon-theme gtk2-engines-murrine gtk2-engines-pixbuf
+            local xp_theme_url="https://github.com/B00merang-Project/Windows-XP/archive/refs/heads/master.zip"
+            local xp_theme_zip="$themes_dir/windows-xp.zip"
+            if download_file "$xp_theme_url" "$xp_theme_zip"; then
+                extract_zip "$xp_theme_zip" "$themes_dir"
+                rm -f "$xp_theme_zip"
+                if [ -d "$themes_dir/Windows-XP-master/Windows XP Luna" ]; then
+                    mv "$themes_dir/Windows-XP-master/Windows XP Luna" "$themes_dir/Windows XP Luna" 2>/dev/null || true
+                fi
+                rm -rf "$themes_dir/Windows-XP-master"
             fi
             ;;
         fsocietyhub)
@@ -201,12 +245,19 @@ set_gsettings_theme() {
     local key="$1"
     local value="$2"
 
-    if gsettings_available; then
-        if ! gsettings set "$key" "$value" >/dev/null 2>&1; then
-            log "Warnung: Theme-Wert $value konnte für $key nicht gesetzt werden."
-        fi
-    else
-        log "gsettings nicht verfügbar. Überspringe Theme-Aktivierung."
+    if ! gsettings_available; then
+        log "gsettings nicht verfügbar oder keine DBUS-Sitzung. Überspringe Theme-Aktivierung für $key."
+        return 1
+    fi
+
+    if ! gsettings writable "$key" >/dev/null 2>&1; then
+        log "Warnung: GSettings-Schlüssel $key ist nicht beschreibbar oder wird nicht unterstützt."
+        return 1
+    fi
+
+    if ! gsettings set "$key" "$value" >/dev/null 2>&1; then
+        log "Warnung: Theme-Wert $value konnte für $key nicht gesetzt werden."
+        return 1
     fi
 }
 
@@ -225,7 +276,12 @@ activate_themes_and_icons() {
             set_gsettings_theme org.gnome.desktop.interface icon-theme "Papirus"
             set_gsettings_theme org.gnome.desktop.wm.preferences theme "Arc"
             ;;
-        hacker|fsocietyhub)
+        windows_xp|hacker)
+            set_gsettings_theme org.gnome.desktop.interface gtk-theme "Windows XP Luna"
+            set_gsettings_theme org.gnome.desktop.interface icon-theme "Papirus"
+            set_gsettings_theme org.gnome.desktop.wm.preferences theme "Windows XP Luna"
+            ;;
+        fsocietyhub)
             set_gsettings_theme org.gnome.desktop.interface gtk-theme "gtk-master"
             set_gsettings_theme org.gnome.desktop.interface icon-theme "Papirus-Dark"
             set_gsettings_theme org.gnome.desktop.wm.preferences theme "gtk-master"
@@ -276,6 +332,17 @@ customize_desktop_environment() {
     log "Passe Desktop-Umgebung für '$design' an..."
 
     local wallpaper_path="$HOME/Pictures/wallpaper.jpg"
+    if [ "$design" = "windows_xp" ] || [ "$design" = "hacker" ]; then
+        wallpaper_path="$HOME/Pictures/kali_windows_xp_wallpaper.jpg"
+    fi
+    if [ "$design" = "fsocietyhub" ]; then
+        wallpaper_path="$HOME/Pictures/fsociety_wallpaper.jpg"
+        if ! [ -f "$wallpaper_path" ]; then
+            local wallpaper_url="https://wallpapercave.com/wp/wp4507663.jpg"
+            download_file "$wallpaper_url" "$wallpaper_path"
+        fi
+    fi
+
     if [ -n "${DISPLAY-}" ] && command_exists feh && [ -f "$wallpaper_path" ]; then
         feh --bg-scale "$wallpaper_path" >/dev/null 2>&1 || log "Fehler beim Setzen der Hintergrundgrafik."
     else
@@ -290,14 +357,16 @@ customize_desktop_environment() {
         fi
     fi
 
-    mkdir -p "$HOME/.config/rofi"
-    local rofi_config_url="https://raw.githubusercontent.com/adi1090x/rofi/master/themes/gruvbox-dark.rasi"
-    local rofi_config_path="$HOME/.config/rofi/config.rasi"
+    local rofi_config_dir="$HOME/.config/rofi"
+    local rofi_config_path="$rofi_config_dir/config.rasi"
+    mkdir -p "$rofi_config_dir"
+
+    local rofi_config_url="https://raw.githubusercontent.com/adi1090x/rofi/master/files/colors/gruvbox.rasi"
     if ! download_file "$rofi_config_url" "$rofi_config_path"; then
         log "Rofi-Konfiguration konnte nicht heruntergeladen werden. Verwende Standardkonfiguration."
         cat > "$rofi_config_path" <<'EOF'
 configuration {
-    theme: "gruvbox-dark"
+    theme: "gruvbox"
 }
 EOF
     fi
@@ -340,13 +409,41 @@ window:
   opacity: 0.9
 EOF
             ;;
-        hacker|fsocietyhub)
+        windows_xp|hacker)
+            cat > "$HOME/.config/alacritty/alacritty.yml" <<'EOF'
+font:
+  normal:
+    family: "Tahoma"
+    style: Regular
+  size: 11.0
+colors:
+  primary:
+    background: '0xC0C0C0'
+    foreground: '0x000000'
+  cursor:
+    text: '0x000000'
+    cursor: '0xFFFFFF'
+window:
+  padding:
+    x: 10
+    y: 10
+  opacity: 0.95
+EOF
+            ;;
+        fsocietyhub)
             cat > "$HOME/.config/alacritty/alacritty.yml" <<'EOF'
 font:
   normal:
     family: "FiraCode Nerd Font"
     style: Regular
   size: 11.0
+colors:
+  primary:
+    background: '0x000000'
+    foreground: '0x00FF00'
+  cursor:
+    text: '0x000000'
+    cursor: '0xFF0000'
 window:
   padding:
     x: 10
@@ -447,6 +544,11 @@ install_uv() {
 apply_design() {
     local design="$1"
 
+    if [ "$design" = "hacker" ]; then
+        log "Altes Hacker-Design wird als Kali Windows XP Mode interpretiert."
+        design="windows_xp"
+    fi
+
     backup_current_setup
     install_custom_dependencies
     nerd_fonts_install
@@ -481,7 +583,7 @@ print_help() {
 Verwendung: ./custom.sh [OPTION]
 
 Optionen:
-  --design <name>    Wende ein Design an (minimalistic, corporate, hacker, fsocietyhub)
+  --design <name>    Wende ein Design an (minimalistic, corporate, windows_xp, fsocietyhub)
   --restore          Stelle den zuletzt gespeicherten Desktop-Zustand wieder her
   --help             Zeige diese Hilfe an
 EOF
@@ -501,13 +603,13 @@ show_menu() {
             echo "Verfügbare Designs:"
             echo "1) Minimalistic"
             echo "2) Corporate"
-            echo "3) Hacker"
+            echo "3) Windows XP"
             echo "4) Fsocietyhub"
             read -rp "Design wählen: " design_choice
             case "$design_choice" in
                 1) apply_design "minimalistic" ;;
                 2) apply_design "corporate" ;;
-                3) apply_design "hacker" ;;
+                3) apply_design "windows_xp" ;;
                 4) apply_design "fsocietyhub" ;;
                 *) error "Ungültige Auswahl." ;;
             esac
