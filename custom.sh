@@ -585,7 +585,171 @@ apply_design() {
     log "Design '$design' angewendet. Bitte starte deine Sitzung neu, um alle Änderungen zu übernehmen."
 }
 
+# ─────────────────────────────────────────────────────────────────────────────
+# FARBEN & FORMATIERUNG
+# ─────────────────────────────────────────────────────────────────────────────
+
+C_RESET='\033[0m'
+C_BOLD='\033[1m'
+C_DIM='\033[2m'
+C_GREEN='\033[0;32m'
+C_BGREEN='\033[1;32m'
+C_CYAN='\033[0;36m'
+C_BCYAN='\033[1;36m'
+C_YELLOW='\033[1;33m'
+C_RED='\033[0;31m'
+C_BRED='\033[1;31m'
+C_MAGENTA='\033[0;35m'
+C_BMAGENTA='\033[1;35m'
+C_BLUE='\033[0;34m'
+C_WHITE='\033[1;37m'
+
+cecho() { echo -e "$1$2${C_RESET}"; }
+header_line() { cecho "$C_CYAN" "$(printf '─%.0s' {1..60})"; }
+section_line() { cecho "$C_DIM" "$(printf '·%.0s' {1..60})"; }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# UMGEBUNGSERKENNUNG
+# ─────────────────────────────────────────────────────────────────────────────
+
+ENV_DE=""
+ENV_WM=""
+ENV_DISPLAY_SERVER=""
+ENV_SESSION=""
+ENV_DISTRO=""
+ENV_COMPOSITOR=""
+
+detect_environment() {
+    # Display-Server
+    if [ -n "${WAYLAND_DISPLAY-}" ]; then
+        ENV_DISPLAY_SERVER="Wayland"
+    elif [ -n "${DISPLAY-}" ]; then
+        ENV_DISPLAY_SERVER="X11"
+    else
+        ENV_DISPLAY_SERVER="Headless/TTY"
+    fi
+
+    # Session / Desktop Environment
+    ENV_SESSION="${XDG_CURRENT_DESKTOP:-${DESKTOP_SESSION:-unbekannt}}"
+    case "${ENV_SESSION,,}" in
+        *gnome*)  ENV_DE="GNOME" ;;
+        *kde*)    ENV_DE="KDE Plasma" ;;
+        *xfce*)   ENV_DE="XFCE" ;;
+        *lxde*)   ENV_DE="LXDE" ;;
+        *lxqt*)   ENV_DE="LXQt" ;;
+        *mate*)   ENV_DE="MATE" ;;
+        *cinnamon*) ENV_DE="Cinnamon" ;;
+        *i3*)     ENV_DE="i3" ;;
+        *sway*)   ENV_DE="Sway" ;;
+        *openbox*) ENV_DE="Openbox" ;;
+        *)        ENV_DE="Unbekannt/Minimal" ;;
+    esac
+
+    # Window Manager
+    if command_exists wmctrl; then
+        ENV_WM="$(wmctrl -m 2>/dev/null | awk '/Name:/{print $2}' || echo "")"
+    fi
+    if [ -z "$ENV_WM" ]; then
+        for wm in i3 sway openbox kwin_x11 kwin_wayland mutter xfwm4 fluxbox bspwm dwm; do
+            if pgrep -x "$wm" >/dev/null 2>&1; then
+                ENV_WM="$wm"; break
+            fi
+        done
+    fi
+    [ -z "$ENV_WM" ] && ENV_WM="unbekannt"
+
+    # Compositor
+    for comp in picom compton xcompmgr; do
+        if pgrep -x "$comp" >/dev/null 2>&1; then
+            ENV_COMPOSITOR="$comp"; break
+        fi
+    done
+    [ -z "$ENV_COMPOSITOR" ] && ENV_COMPOSITOR="keiner/eingebaut"
+
+    # Distro
+    if [ -f /etc/os-release ]; then
+        ENV_DISTRO="$(. /etc/os-release && echo "${PRETTY_NAME:-$ID}")"
+    else
+        ENV_DISTRO="Unbekannt"
+    fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EINSTELLUNGS-PERSISTENZ
+# ─────────────────────────────────────────────────────────────────────────────
+
+SETTINGS_DIR="$HOME/.config/kali-desktop"
+SETTINGS_FILE="$SETTINGS_DIR/settings.conf"
+
+# Aktuelle Konfigurationswerte (Defaults)
+CFG_DESIGN="fsocietyhub"
+CFG_WM="auto"
+CFG_COMPOSITOR="picom"
+CFG_TERMINAL="alacritty"
+CFG_BAR="auto"
+CFG_LAUNCHER="rofi"
+CFG_FILEMANAGER="thunar"
+CFG_NOTIFICATIONS="dunst"
+CFG_WALLPAPER_TOOL="feh"
+CFG_GTK_THEME="auto"
+CFG_ICON_THEME="auto"
+CFG_FONT="FiraCode Nerd Font"
+CFG_FONT_SIZE="11"
+
+load_settings() {
+    mkdir -p "$SETTINGS_DIR"
+    if [ -f "$SETTINGS_FILE" ]; then
+        # Nur bekannte Schlüssel einlesen (Sicherheit: kein blindes source)
+        while IFS='=' read -r key value; do
+            [[ "$key" =~ ^[[:space:]]*# ]] && continue
+            [[ -z "$key" ]] && continue
+            value="${value//\"/}"
+            case "$key" in
+                CFG_DESIGN)       CFG_DESIGN="$value" ;;
+                CFG_WM)           CFG_WM="$value" ;;
+                CFG_COMPOSITOR)   CFG_COMPOSITOR="$value" ;;
+                CFG_TERMINAL)     CFG_TERMINAL="$value" ;;
+                CFG_BAR)          CFG_BAR="$value" ;;
+                CFG_LAUNCHER)     CFG_LAUNCHER="$value" ;;
+                CFG_FILEMANAGER)  CFG_FILEMANAGER="$value" ;;
+                CFG_NOTIFICATIONS) CFG_NOTIFICATIONS="$value" ;;
+                CFG_WALLPAPER_TOOL) CFG_WALLPAPER_TOOL="$value" ;;
+                CFG_GTK_THEME)    CFG_GTK_THEME="$value" ;;
+                CFG_ICON_THEME)   CFG_ICON_THEME="$value" ;;
+                CFG_FONT)         CFG_FONT="$value" ;;
+                CFG_FONT_SIZE)    CFG_FONT_SIZE="$value" ;;
+            esac
+        done < "$SETTINGS_FILE"
+    fi
+}
+
+save_settings() {
+    mkdir -p "$SETTINGS_DIR"
+    cat > "$SETTINGS_FILE" <<EOF
+# Kali Desktop Konfiguration – gespeichert am $(date)
+CFG_DESIGN="$CFG_DESIGN"
+CFG_WM="$CFG_WM"
+CFG_COMPOSITOR="$CFG_COMPOSITOR"
+CFG_TERMINAL="$CFG_TERMINAL"
+CFG_BAR="$CFG_BAR"
+CFG_LAUNCHER="$CFG_LAUNCHER"
+CFG_FILEMANAGER="$CFG_FILEMANAGER"
+CFG_NOTIFICATIONS="$CFG_NOTIFICATIONS"
+CFG_WALLPAPER_TOOL="$CFG_WALLPAPER_TOOL"
+CFG_GTK_THEME="$CFG_GTK_THEME"
+CFG_ICON_THEME="$CFG_ICON_THEME"
+CFG_FONT="$CFG_FONT"
+CFG_FONT_SIZE="$CFG_FONT_SIZE"
+EOF
+    cecho "$C_BGREEN" "  ✔ Einstellungen gespeichert: $SETTINGS_FILE"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BANNER & MENÜ-HELFER
+# ─────────────────────────────────────────────────────────────────────────────
+
 show_fsocietyhub_banner() {
+    echo -e "${C_BGREEN}"
     cat <<'EOF'
 ███████╗███████╗ ██████╗  ██████╗██╗███████╗████████╗██╗   ██╗██╗  ██╗██╗   ██╗██████╗
 ██╔════╝██╔════╝██╔═══██╗██╔════╝██║██╔════╝╚══██╔══╝╚██╗ ██╔╝██║  ██║██║   ██║██╔══██╗
@@ -594,55 +758,875 @@ show_fsocietyhub_banner() {
 ██║     ███████║╚██████╔╝╚██████╗██║███████╗   ██║      ██║   ██║  ██║╚██████╔╝██████╔╝
 ╚═╝     ╚══════╝ ╚═════╝  ╚═════╝╚═╝╚══════╝   ╚═╝      ╚═╝   ╚═╝  ╚═╝ ╚═════╝ ╚═════╝
 EOF
+    echo -e "${C_RESET}"
 }
 
+menu_header() {
+    local title="$1"
+    clear
+    show_fsocietyhub_banner
+    header_line
+    cecho "$C_BCYAN" "  $title"
+    cecho "$C_DIM" "  System: $ENV_DISTRO  |  DE: $ENV_DE  |  WM: $ENV_WM  |  $ENV_DISPLAY_SERVER"
+    header_line
+    echo ""
+}
+
+show_option() {
+    local num="$1" label="$2" current="$3"
+    if [ -n "$current" ]; then
+        echo -e "  ${C_YELLOW}${num})${C_RESET} ${C_WHITE}${label}${C_RESET}  ${C_DIM}[aktuell: ${current}]${C_RESET}"
+    else
+        echo -e "  ${C_YELLOW}${num})${C_RESET} ${C_WHITE}${label}${C_RESET}"
+    fi
+}
+
+show_back() {
+    echo -e "  ${C_DIM}0) Zurück${C_RESET}"
+}
+
+prompt_choice() {
+    echo ""
+    echo -e -n "  ${C_BCYAN}▶ Auswahl: ${C_RESET}"
+    read -r choice
+    echo "$choice"
+}
+
+confirm_action() {
+    local msg="$1"
+    echo -e "\n  ${C_YELLOW}${msg}${C_RESET}"
+    echo -e -n "  ${C_BOLD}Fortfahren? [j/N]: ${C_RESET}"
+    read -r yn
+    [[ "${yn,,}" == "j" || "${yn,,}" == "ja" || "${yn,,}" == "y" || "${yn,,}" == "yes" ]]
+}
+
+press_enter() {
+    echo -e "\n  ${C_DIM}[ Enter drücken um fortzufahren... ]${C_RESET}"
+    read -r
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STATUS-ANZEIGE
+# ─────────────────────────────────────────────────────────────────────────────
+
+show_status() {
+    menu_header "SYSTEM STATUS & KONFIGURATION"
+
+    cecho "$C_BCYAN" "  ── Erkannte Umgebung ──────────────────────────────────"
+    echo -e "  ${C_DIM}Distro:${C_RESET}          $ENV_DISTRO"
+    echo -e "  ${C_DIM}Desktop:${C_RESET}         $ENV_DE"
+    echo -e "  ${C_DIM}Window Manager:${C_RESET}  $ENV_WM"
+    echo -e "  ${C_DIM}Compositor:${C_RESET}      $ENV_COMPOSITOR"
+    echo -e "  ${C_DIM}Display Server:${C_RESET}  $ENV_DISPLAY_SERVER"
+    echo -e "  ${C_DIM}Session:${C_RESET}         $ENV_SESSION"
+
+    echo ""
+    cecho "$C_BCYAN" "  ── Gespeicherte Konfiguration ─────────────────────────"
+    echo -e "  ${C_DIM}Design-Preset:${C_RESET}   $CFG_DESIGN"
+    echo -e "  ${C_DIM}Window Manager:${C_RESET}  $CFG_WM"
+    echo -e "  ${C_DIM}Compositor:${C_RESET}      $CFG_COMPOSITOR"
+    echo -e "  ${C_DIM}Terminal:${C_RESET}        $CFG_TERMINAL"
+    echo -e "  ${C_DIM}Bar/Panel:${C_RESET}       $CFG_BAR"
+    echo -e "  ${C_DIM}Launcher:${C_RESET}        $CFG_LAUNCHER"
+    echo -e "  ${C_DIM}Dateimanager:${C_RESET}    $CFG_FILEMANAGER"
+    echo -e "  ${C_DIM}Notifications:${C_RESET}   $CFG_NOTIFICATIONS"
+    echo -e "  ${C_DIM}Wallpaper-Tool:${C_RESET}  $CFG_WALLPAPER_TOOL"
+    echo -e "  ${C_DIM}GTK Theme:${C_RESET}       $CFG_GTK_THEME"
+    echo -e "  ${C_DIM}Icon Theme:${C_RESET}      $CFG_ICON_THEME"
+    echo -e "  ${C_DIM}Schrift:${C_RESET}         $CFG_FONT $CFG_FONT_SIZE"
+
+    echo ""
+    cecho "$C_BCYAN" "  ── Installierte Tools ─────────────────────────────────"
+    local tools=(i3 sway openbox picom alacritty kitty rofi dmenu waybar polybar thunar nautilus dunst mako feh nitrogen variety neofetch btop)
+    for t in "${tools[@]}"; do
+        if command_exists "$t"; then
+            echo -e "  ${C_BGREEN}✔${C_RESET} $t"
+        else
+            echo -e "  ${C_DIM}✘ $t${C_RESET}"
+        fi
+    done
+
+    press_enter
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# KOMPONENTEN-KONFIGURATIONSMENÜS
+# ─────────────────────────────────────────────────────────────────────────────
+
+menu_select_wm() {
+    menu_header "WINDOW MANAGER AUSWÄHLEN"
+    cecho "$C_DIM" "  Erkannt: $ENV_WM  |  Display: $ENV_DISPLAY_SERVER"
+    echo ""
+
+    local wms_x11=(i3 openbox bspwm fluxbox dwm xmonad)
+    local wms_wayland=(sway hyprland river)
+
+    if [ "$ENV_DISPLAY_SERVER" = "Wayland" ]; then
+        cecho "$C_YELLOW" "  Wayland-kompatible Window Manager:"
+        for i in "${!wms_wayland[@]}"; do
+            show_option "$((i+1))" "${wms_wayland[$i]}"
+        done
+        echo ""
+        cecho "$C_YELLOW" "  X11 Window Manager (über XWayland):"
+        for i in "${!wms_x11[@]}"; do
+            show_option "$((i+10))" "${wms_x11[$i]}"
+        done
+    else
+        cecho "$C_YELLOW" "  X11 Window Manager:"
+        for i in "${!wms_x11[@]}"; do
+            show_option "$((i+1))" "${wms_x11[$i]}"
+        done
+        echo ""
+        cecho "$C_YELLOW" "  Wayland Window Manager:"
+        for i in "${!wms_wayland[@]}"; do
+            show_option "$((i+10))" "${wms_wayland[$i]}"
+        done
+    fi
+    echo ""
+    show_option "99" "Manuell eingeben"
+    show_back
+    echo ""
+    cecho "$C_DIM" "  Aktuell gespeichert: $CFG_WM"
+
+    local c; c=$(prompt_choice)
+    case "$c" in
+        1)  CFG_WM="i3" ;;
+        2)  CFG_WM="openbox" ;;
+        3)  CFG_WM="bspwm" ;;
+        4)  CFG_WM="fluxbox" ;;
+        5)  CFG_WM="dwm" ;;
+        6)  CFG_WM="xmonad" ;;
+        10) CFG_WM="sway" ;;
+        11) CFG_WM="hyprland" ;;
+        12) CFG_WM="river" ;;
+        99)
+            echo -e -n "  ${C_BCYAN}Window Manager Name: ${C_RESET}"
+            read -r CFG_WM
+            ;;
+        0) return ;;
+        *) error "Ungültige Auswahl." ; press_enter ; return ;;
+    esac
+    cecho "$C_BGREEN" "  ✔ Window Manager gesetzt: $CFG_WM"
+    save_settings
+    press_enter
+}
+
+menu_select_compositor() {
+    menu_header "COMPOSITOR AUSWÄHLEN"
+    echo ""
+    show_option "1" "picom          " "empfohlen für X11"
+    show_option "2" "compton        " "älterer picom-Fork"
+    show_option "3" "xcompmgr       " "minimal"
+    show_option "4" "eingebaut      " "z.B. KWin, Mutter"
+    show_option "5" "keiner         " "kein Compositor"
+    echo ""
+    show_back
+    echo ""
+    cecho "$C_DIM" "  Aktuell gespeichert: $CFG_COMPOSITOR"
+
+    local c; c=$(prompt_choice)
+    case "$c" in
+        1) CFG_COMPOSITOR="picom" ;;
+        2) CFG_COMPOSITOR="compton" ;;
+        3) CFG_COMPOSITOR="xcompmgr" ;;
+        4) CFG_COMPOSITOR="eingebaut" ;;
+        5) CFG_COMPOSITOR="keiner" ;;
+        0) return ;;
+        *) error "Ungültige Auswahl." ; press_enter ; return ;;
+    esac
+    cecho "$C_BGREEN" "  ✔ Compositor gesetzt: $CFG_COMPOSITOR"
+    save_settings
+    press_enter
+}
+
+menu_select_terminal() {
+    menu_header "TERMINAL-EMULATOR AUSWÄHLEN"
+    echo ""
+    show_option "1" "alacritty      " "GPU-beschleunigt, konfigurierbar"
+    show_option "2" "kitty          " "GPU-beschleunigt, Feature-reich"
+    show_option "3" "xterm          " "klassisch, minimal"
+    show_option "4" "xfce4-terminal " "XFCE Standard"
+    show_option "5" "gnome-terminal " "GNOME Standard"
+    show_option "6" "konsole        " "KDE Standard"
+    show_option "7" "terminator     " "Split-Pane Terminal"
+    show_option "8" "st             " "suckless terminal"
+    echo ""
+    show_back
+    echo ""
+    cecho "$C_DIM" "  Aktuell gespeichert: $CFG_TERMINAL"
+
+    local c; c=$(prompt_choice)
+    case "$c" in
+        1) CFG_TERMINAL="alacritty" ;;
+        2) CFG_TERMINAL="kitty" ;;
+        3) CFG_TERMINAL="xterm" ;;
+        4) CFG_TERMINAL="xfce4-terminal" ;;
+        5) CFG_TERMINAL="gnome-terminal" ;;
+        6) CFG_TERMINAL="konsole" ;;
+        7) CFG_TERMINAL="terminator" ;;
+        8) CFG_TERMINAL="st" ;;
+        0) return ;;
+        *) error "Ungültige Auswahl." ; press_enter ; return ;;
+    esac
+    cecho "$C_BGREEN" "  ✔ Terminal gesetzt: $CFG_TERMINAL"
+    save_settings
+    press_enter
+}
+
+menu_select_bar() {
+    menu_header "BAR / PANEL AUSWÄHLEN"
+    echo ""
+    show_option "1" "polybar        " "sehr konfigurierbar, X11"
+    show_option "2" "waybar         " "Wayland/Sway Standard"
+    show_option "3" "tint2          " "leichtgewichtig, X11"
+    show_option "4" "xfce4-panel    " "XFCE Panel"
+    show_option "5" "lxpanel        " "LXDE Panel"
+    show_option "6" "i3bar          " "i3 integriert"
+    show_option "7" "keiner         " "keine Bar"
+    echo ""
+    show_back
+    echo ""
+    cecho "$C_DIM" "  Aktuell gespeichert: $CFG_BAR"
+    cecho "$C_DIM" "  Erkannter Display-Server: $ENV_DISPLAY_SERVER"
+
+    local c; c=$(prompt_choice)
+    case "$c" in
+        1) CFG_BAR="polybar" ;;
+        2) CFG_BAR="waybar" ;;
+        3) CFG_BAR="tint2" ;;
+        4) CFG_BAR="xfce4-panel" ;;
+        5) CFG_BAR="lxpanel" ;;
+        6) CFG_BAR="i3bar" ;;
+        7) CFG_BAR="keiner" ;;
+        0) return ;;
+        *) error "Ungültige Auswahl." ; press_enter ; return ;;
+    esac
+    cecho "$C_BGREEN" "  ✔ Bar gesetzt: $CFG_BAR"
+    save_settings
+    press_enter
+}
+
+menu_select_launcher() {
+    menu_header "APP-LAUNCHER AUSWÄHLEN"
+    echo ""
+    show_option "1" "rofi           " "mächtig, sehr anpassbar"
+    show_option "2" "dmenu          " "minimal, suckless"
+    show_option "3" "wofi           " "Wayland-native"
+    show_option "4" "ulauncher      " "modernes GUI"
+    show_option "5" "albert         " "spotlight-ähnlich"
+    show_option "6" "keiner         " "kein Launcher"
+    echo ""
+    show_back
+    echo ""
+    cecho "$C_DIM" "  Aktuell gespeichert: $CFG_LAUNCHER"
+
+    local c; c=$(prompt_choice)
+    case "$c" in
+        1) CFG_LAUNCHER="rofi" ;;
+        2) CFG_LAUNCHER="dmenu" ;;
+        3) CFG_LAUNCHER="wofi" ;;
+        4) CFG_LAUNCHER="ulauncher" ;;
+        5) CFG_LAUNCHER="albert" ;;
+        6) CFG_LAUNCHER="keiner" ;;
+        0) return ;;
+        *) error "Ungültige Auswahl." ; press_enter ; return ;;
+    esac
+    cecho "$C_BGREEN" "  ✔ Launcher gesetzt: $CFG_LAUNCHER"
+    save_settings
+    press_enter
+}
+
+menu_select_filemanager() {
+    menu_header "DATEIMANAGER AUSWÄHLEN"
+    echo ""
+    show_option "1" "thunar         " "XFCE, schnell"
+    show_option "2" "nautilus       " "GNOME Files"
+    show_option "3" "dolphin        " "KDE Dolphin"
+    show_option "4" "nemo           " "Cinnamon Fork"
+    show_option "5" "ranger         " "TUI, vim-like"
+    show_option "6" "lf             " "TUI, modernes ranger"
+    show_option "7" "pcmanfm        " "LXDE, leichtgewichtig"
+    echo ""
+    show_back
+    echo ""
+    cecho "$C_DIM" "  Aktuell gespeichert: $CFG_FILEMANAGER"
+
+    local c; c=$(prompt_choice)
+    case "$c" in
+        1) CFG_FILEMANAGER="thunar" ;;
+        2) CFG_FILEMANAGER="nautilus" ;;
+        3) CFG_FILEMANAGER="dolphin" ;;
+        4) CFG_FILEMANAGER="nemo" ;;
+        5) CFG_FILEMANAGER="ranger" ;;
+        6) CFG_FILEMANAGER="lf" ;;
+        7) CFG_FILEMANAGER="pcmanfm" ;;
+        0) return ;;
+        *) error "Ungültige Auswahl." ; press_enter ; return ;;
+    esac
+    cecho "$C_BGREEN" "  ✔ Dateimanager gesetzt: $CFG_FILEMANAGER"
+    save_settings
+    press_enter
+}
+
+menu_select_notifications() {
+    menu_header "BENACHRICHTIGUNGS-DAEMON AUSWÄHLEN"
+    echo ""
+    show_option "1" "dunst          " "leichtgewichtig, X11/Wayland"
+    show_option "2" "mako           " "Wayland-native"
+    show_option "3" "notify-osd     " "Ubuntu-Stil"
+    show_option "4" "xfce4-notifyd  " "XFCE Standard"
+    show_option "5" "keiner         " "keine Benachrichtigungen"
+    echo ""
+    show_back
+    echo ""
+    cecho "$C_DIM" "  Aktuell gespeichert: $CFG_NOTIFICATIONS"
+
+    local c; c=$(prompt_choice)
+    case "$c" in
+        1) CFG_NOTIFICATIONS="dunst" ;;
+        2) CFG_NOTIFICATIONS="mako" ;;
+        3) CFG_NOTIFICATIONS="notify-osd" ;;
+        4) CFG_NOTIFICATIONS="xfce4-notifyd" ;;
+        5) CFG_NOTIFICATIONS="keiner" ;;
+        0) return ;;
+        *) error "Ungültige Auswahl." ; press_enter ; return ;;
+    esac
+    cecho "$C_BGREEN" "  ✔ Notifications gesetzt: $CFG_NOTIFICATIONS"
+    save_settings
+    press_enter
+}
+
+menu_select_wallpaper_tool() {
+    menu_header "WALLPAPER-TOOL AUSWÄHLEN"
+    echo ""
+    show_option "1" "feh            " "minimal, CLI, X11"
+    show_option "2" "nitrogen       " "GUI-Auswahl, X11"
+    show_option "3" "variety        " "automatischer Wechsel"
+    show_option "4" "swaybg         " "Wayland/Sway"
+    show_option "5" "xwallpaper     " "X11, einfach"
+    echo ""
+    show_back
+    echo ""
+    cecho "$C_DIM" "  Aktuell gespeichert: $CFG_WALLPAPER_TOOL"
+
+    local c; c=$(prompt_choice)
+    case "$c" in
+        1) CFG_WALLPAPER_TOOL="feh" ;;
+        2) CFG_WALLPAPER_TOOL="nitrogen" ;;
+        3) CFG_WALLPAPER_TOOL="variety" ;;
+        4) CFG_WALLPAPER_TOOL="swaybg" ;;
+        5) CFG_WALLPAPER_TOOL="xwallpaper" ;;
+        0) return ;;
+        *) error "Ungültige Auswahl." ; press_enter ; return ;;
+    esac
+    cecho "$C_BGREEN" "  ✔ Wallpaper-Tool gesetzt: $CFG_WALLPAPER_TOOL"
+    save_settings
+    press_enter
+}
+
+menu_select_gtk_theme() {
+    menu_header "GTK-THEME AUSWÄHLEN"
+    echo ""
+
+    # Installierte Themes auflisten
+    local themes=()
+    local theme_dirs=("$HOME/.themes" "/usr/share/themes")
+    for d in "${theme_dirs[@]}"; do
+        if [ -d "$d" ]; then
+            while IFS= read -r -d '' t; do
+                themes+=("$(basename "$t")")
+            done < <(find "$d" -maxdepth 1 -mindepth 1 -type d -print0 2>/dev/null)
+        fi
+    done
+
+    if [ "${#themes[@]}" -gt 0 ]; then
+        cecho "$C_YELLOW" "  Installierte Themes:"
+        for i in "${!themes[@]}"; do
+            show_option "$((i+1))" "${themes[$i]}"
+        done
+    else
+        cecho "$C_DIM" "  Keine installierten Themes gefunden."
+    fi
+    echo ""
+    cecho "$C_YELLOW" "  Bekannte Themes (direkte Auswahl):"
+    show_option "50" "Adwaita        " "GNOME Standard"
+    show_option "51" "Arc            " "modern, flach"
+    show_option "52" "Arc-Dark       " "dark variant"
+    show_option "53" "Dracula        " "dunkel, lila"
+    show_option "54" "Windows XP Luna" "retro"
+    show_option "99" "Manuell eingeben"
+    show_back
+    echo ""
+    cecho "$C_DIM" "  Aktuell gespeichert: $CFG_GTK_THEME"
+
+    local c; c=$(prompt_choice)
+    case "$c" in
+        0) return ;;
+        50) CFG_GTK_THEME="Adwaita" ;;
+        51) CFG_GTK_THEME="Arc" ;;
+        52) CFG_GTK_THEME="Arc-Dark" ;;
+        53) CFG_GTK_THEME="Dracula" ;;
+        54) CFG_GTK_THEME="Windows XP Luna" ;;
+        99)
+            echo -e -n "  ${C_BCYAN}Theme-Name: ${C_RESET}"
+            read -r CFG_GTK_THEME
+            ;;
+        *)
+            if [[ "$c" =~ ^[0-9]+$ ]] && [ "$c" -ge 1 ] && [ "$c" -le "${#themes[@]}" ]; then
+                CFG_GTK_THEME="${themes[$((c-1))]}"
+            else
+                error "Ungültige Auswahl."; press_enter; return
+            fi
+            ;;
+    esac
+    cecho "$C_BGREEN" "  ✔ GTK-Theme gesetzt: $CFG_GTK_THEME"
+    if gsettings_available; then
+        gsettings set org.gnome.desktop.interface gtk-theme "$CFG_GTK_THEME" 2>/dev/null || true
+    fi
+    save_settings
+    press_enter
+}
+
+menu_select_icon_theme() {
+    menu_header "ICON-THEME AUSWÄHLEN"
+    echo ""
+
+    local icons=()
+    local icon_dirs=("$HOME/.icons" "/usr/share/icons")
+    for d in "${icon_dirs[@]}"; do
+        if [ -d "$d" ]; then
+            while IFS= read -r -d '' t; do
+                icons+=("$(basename "$t")")
+            done < <(find "$d" -maxdepth 1 -mindepth 1 -type d -print0 2>/dev/null)
+        fi
+    done
+
+    if [ "${#icons[@]}" -gt 0 ]; then
+        cecho "$C_YELLOW" "  Installierte Icon-Themes:"
+        for i in "${!icons[@]}"; do
+            show_option "$((i+1))" "${icons[$i]}"
+        done
+    else
+        cecho "$C_DIM" "  Keine installierten Icon-Themes gefunden."
+    fi
+    echo ""
+    show_option "50" "Adwaita"
+    show_option "51" "Papirus"
+    show_option "52" "Papirus-Dark"
+    show_option "53" "hicolor"
+    show_option "99" "Manuell eingeben"
+    show_back
+    echo ""
+    cecho "$C_DIM" "  Aktuell gespeichert: $CFG_ICON_THEME"
+
+    local c; c=$(prompt_choice)
+    case "$c" in
+        0) return ;;
+        50) CFG_ICON_THEME="Adwaita" ;;
+        51) CFG_ICON_THEME="Papirus" ;;
+        52) CFG_ICON_THEME="Papirus-Dark" ;;
+        53) CFG_ICON_THEME="hicolor" ;;
+        99)
+            echo -e -n "  ${C_BCYAN}Icon-Theme-Name: ${C_RESET}"
+            read -r CFG_ICON_THEME
+            ;;
+        *)
+            if [[ "$c" =~ ^[0-9]+$ ]] && [ "$c" -ge 1 ] && [ "$c" -le "${#icons[@]}" ]; then
+                CFG_ICON_THEME="${icons[$((c-1))]}"
+            else
+                error "Ungültige Auswahl."; press_enter; return
+            fi
+            ;;
+    esac
+    cecho "$C_BGREEN" "  ✔ Icon-Theme gesetzt: $CFG_ICON_THEME"
+    if gsettings_available; then
+        gsettings set org.gnome.desktop.interface icon-theme "$CFG_ICON_THEME" 2>/dev/null || true
+    fi
+    save_settings
+    press_enter
+}
+
+menu_select_font() {
+    menu_header "SCHRIFTART KONFIGURIEREN"
+    echo ""
+    cecho "$C_YELLOW" "  Empfohlene Schriftarten:"
+    show_option "1" "FiraCode Nerd Font    " "empfohlen, mit Icons"
+    show_option "2" "JetBrains Mono        " "Programmier-Schrift"
+    show_option "3" "Hack Nerd Font        " "klar, lesbar"
+    show_option "4" "DejaVu Sans Mono      " "Standard"
+    show_option "5" "Monospace             " "System-Standard"
+    show_option "6" "Tahoma                " "Windows-ähnlich"
+    show_option "99" "Manuell eingeben"
+    echo ""
+    show_back
+    echo ""
+    cecho "$C_DIM" "  Aktuell: $CFG_FONT  Größe: $CFG_FONT_SIZE"
+
+    local c; c=$(prompt_choice)
+    case "$c" in
+        0) return ;;
+        1) CFG_FONT="FiraCode Nerd Font" ;;
+        2) CFG_FONT="JetBrains Mono" ;;
+        3) CFG_FONT="Hack Nerd Font" ;;
+        4) CFG_FONT="DejaVu Sans Mono" ;;
+        5) CFG_FONT="Monospace" ;;
+        6) CFG_FONT="Tahoma" ;;
+        99)
+            echo -e -n "  ${C_BCYAN}Schriftart: ${C_RESET}"
+            read -r CFG_FONT
+            ;;
+        *) error "Ungültige Auswahl."; press_enter; return ;;
+    esac
+    echo -e -n "  ${C_BCYAN}Schriftgröße [aktuell: $CFG_FONT_SIZE]: ${C_RESET}"
+    read -r new_size
+    if [[ "$new_size" =~ ^[0-9]+$ ]]; then
+        CFG_FONT_SIZE="$new_size"
+    fi
+    cecho "$C_BGREEN" "  ✔ Schrift gesetzt: $CFG_FONT $CFG_FONT_SIZE"
+    save_settings
+    press_enter
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BENUTZERDEFINIERTES SETUP-MENÜ
+# ─────────────────────────────────────────────────────────────────────────────
+
+apply_custom_config() {
+    menu_header "BENUTZERDEFINIERTE KONFIGURATION ANWENDEN"
+    echo ""
+    cecho "$C_YELLOW" "  Folgende Komponenten werden konfiguriert:"
+    echo -e "  ${C_DIM}Window Manager:${C_RESET}  $CFG_WM"
+    echo -e "  ${C_DIM}Compositor:${C_RESET}      $CFG_COMPOSITOR"
+    echo -e "  ${C_DIM}Terminal:${C_RESET}        $CFG_TERMINAL"
+    echo -e "  ${C_DIM}Bar:${C_RESET}             $CFG_BAR"
+    echo -e "  ${C_DIM}Launcher:${C_RESET}        $CFG_LAUNCHER"
+    echo -e "  ${C_DIM}GTK Theme:${C_RESET}       $CFG_GTK_THEME"
+    echo -e "  ${C_DIM}Icon Theme:${C_RESET}      $CFG_ICON_THEME"
+    echo -e "  ${C_DIM}Schrift:${C_RESET}         $CFG_FONT $CFG_FONT_SIZE"
+    echo ""
+
+    if ! confirm_action "Benutzerdefinierte Konfiguration anwenden?"; then
+        return
+    fi
+
+    backup_current_setup
+    install_custom_dependencies
+
+    # Compositor installieren
+    if [[ "$CFG_COMPOSITOR" =~ ^(picom|compton|xcompmgr)$ ]]; then
+        safe_install_packages "$CFG_COMPOSITOR"
+    fi
+
+    # Terminal installieren
+    case "$CFG_TERMINAL" in
+        alacritty|kitty|xterm|terminator)
+            safe_install_packages "$CFG_TERMINAL"
+            ;;
+        xfce4-terminal) safe_install_packages "xfce4-terminal" ;;
+        gnome-terminal) safe_install_packages "gnome-terminal" ;;
+        konsole)        safe_install_packages "konsole" ;;
+    esac
+
+    # Launcher installieren
+    case "$CFG_LAUNCHER" in
+        rofi)       safe_install_packages rofi ;;
+        dmenu)      safe_install_packages suckless-tools ;;
+        wofi)       safe_install_packages wofi ;;
+        ulauncher)  safe_install_packages ulauncher ;;
+    esac
+
+    # Bar installieren
+    case "$CFG_BAR" in
+        polybar)    safe_install_packages polybar ;;
+        waybar)     safe_install_packages waybar ;;
+        tint2)      safe_install_packages tint2 ;;
+    esac
+
+    # Dateimanager installieren
+    case "$CFG_FILEMANAGER" in
+        thunar)   safe_install_packages thunar ;;
+        nautilus) safe_install_packages nautilus ;;
+        dolphin)  safe_install_packages dolphin ;;
+        nemo)     safe_install_packages nemo ;;
+        ranger)   safe_install_packages ranger ;;
+        pcmanfm)  safe_install_packages pcmanfm ;;
+    esac
+
+    # Benachrichtigungen installieren
+    case "$CFG_NOTIFICATIONS" in
+        dunst)         safe_install_packages dunst ;;
+        mako)          safe_install_packages mako-notifier ;;
+        notify-osd)    safe_install_packages notify-osd ;;
+        xfce4-notifyd) safe_install_packages xfce4-notifyd ;;
+    esac
+
+    # Wallpaper Tool installieren
+    case "$CFG_WALLPAPER_TOOL" in
+        feh)       safe_install_packages feh ;;
+        nitrogen)  safe_install_packages nitrogen ;;
+        variety)   safe_install_packages variety ;;
+        swaybg)    safe_install_packages swaybg ;;
+    esac
+
+    # Nerd Fonts installieren
+    nerd_fonts_install
+
+    # GTK Theme & Icons
+    if [ "$CFG_GTK_THEME" != "auto" ]; then
+        activate_themes_and_icons "$CFG_DESIGN" || true
+        if gsettings_available && [ -n "$CFG_GTK_THEME" ]; then
+            gsettings set org.gnome.desktop.interface gtk-theme "$CFG_GTK_THEME" 2>/dev/null || true
+        fi
+    fi
+    if gsettings_available && [ "$CFG_ICON_THEME" != "auto" ] && [ -n "$CFG_ICON_THEME" ]; then
+        gsettings set org.gnome.desktop.interface icon-theme "$CFG_ICON_THEME" 2>/dev/null || true
+    fi
+
+    # Alacritty konfigurieren (mit gewählter Schrift)
+    if [ "$CFG_TERMINAL" = "alacritty" ]; then
+        mkdir -p "$HOME/.config/alacritty"
+        cat > "$HOME/.config/alacritty/alacritty.yml" <<EOF
+font:
+  normal:
+    family: "$CFG_FONT"
+    style: Regular
+  size: $CFG_FONT_SIZE.0
+window:
+  padding:
+    x: 10
+    y: 10
+  opacity: 0.95
+EOF
+    fi
+
+    # i3/Sway konfigurieren
+    config_i3_or_sway "$CFG_DESIGN"
+
+    # Compositor starten
+    if [[ "$CFG_COMPOSITOR" =~ ^(picom|compton)$ ]] && command_exists "$CFG_COMPOSITOR"; then
+        "$CFG_COMPOSITOR" -b >/dev/null 2>&1 || true
+    fi
+
+    finetuning_and_optimizations
+    manage_dot_files
+    install_uv
+
+    cecho "$C_BGREEN" "\n  ✔ Benutzerdefinierte Konfiguration angewendet."
+    cecho "$C_YELLOW" "  Bitte starte deine Sitzung neu, um alle Änderungen zu übernehmen."
+    press_enter
+}
+
+menu_custom_setup() {
+    while true; do
+        menu_header "BENUTZERDEFINIERTES SETUP"
+        echo ""
+        show_option "1"  "Window Manager      " "$CFG_WM"
+        show_option "2"  "Compositor          " "$CFG_COMPOSITOR"
+        show_option "3"  "Terminal            " "$CFG_TERMINAL"
+        show_option "4"  "Bar / Panel         " "$CFG_BAR"
+        show_option "5"  "App-Launcher        " "$CFG_LAUNCHER"
+        show_option "6"  "Dateimanager        " "$CFG_FILEMANAGER"
+        show_option "7"  "Benachrichtigungen  " "$CFG_NOTIFICATIONS"
+        show_option "8"  "Wallpaper-Tool      " "$CFG_WALLPAPER_TOOL"
+        show_option "9"  "GTK Theme           " "$CFG_GTK_THEME"
+        show_option "10" "Icon Theme          " "$CFG_ICON_THEME"
+        show_option "11" "Schriftart          " "$CFG_FONT $CFG_FONT_SIZE"
+        echo ""
+        section_line
+        show_option "12" "Alles anwenden"
+        show_option "13" "Einstellungen speichern (ohne Anwenden)"
+        show_back
+        echo ""
+
+        local c; c=$(prompt_choice)
+        case "$c" in
+            1)  menu_select_wm ;;
+            2)  menu_select_compositor ;;
+            3)  menu_select_terminal ;;
+            4)  menu_select_bar ;;
+            5)  menu_select_launcher ;;
+            6)  menu_select_filemanager ;;
+            7)  menu_select_notifications ;;
+            8)  menu_select_wallpaper_tool ;;
+            9)  menu_select_gtk_theme ;;
+            10) menu_select_icon_theme ;;
+            11) menu_select_font ;;
+            12) apply_custom_config ;;
+            13) save_settings ; press_enter ;;
+            0)  break ;;
+            *)  error "Ungültige Auswahl." ; press_enter ;;
+        esac
+    done
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TOOLS-MENÜ
+# ─────────────────────────────────────────────────────────────────────────────
+
+menu_tools() {
+    while true; do
+        menu_header "TOOLS VERWALTEN"
+        echo ""
+        cecho "$C_YELLOW" "  ── Systemüberwachung ───────────────────────────────"
+        show_option "1" "btop / htop / glances / neofetch  installieren"
+        echo ""
+        cecho "$C_YELLOW" "  ── Audio & Medien ──────────────────────────────────"
+        show_option "2" "pavucontrol / playerctl / vlc     installieren"
+        echo ""
+        cecho "$C_YELLOW" "  ── Hardware ────────────────────────────────────────"
+        show_option "3" "brightnessctl                     installieren"
+        show_option "4" "network-manager-applet            installieren"
+        show_option "5" "arandr (Bildschirm-Layout)        installieren"
+        echo ""
+        cecho "$C_YELLOW" "  ── Entwicklung ─────────────────────────────────────"
+        show_option "6" "Nerd Fonts                        installieren"
+        show_option "7" "uv (Python-Manager)               installieren"
+        echo ""
+        cecho "$C_YELLOW" "  ── Wartung ─────────────────────────────────────────"
+        show_option "8" "Systembereinigung (autoremove/clean)"
+        show_option "9" "Dotfiles verwalten (git bare repo)"
+        echo ""
+        show_back
+        echo ""
+
+        local c; c=$(prompt_choice)
+        case "$c" in
+            1) install_system_monitoring_tools ; press_enter ;;
+            2) audio_and_media_tools ; press_enter ;;
+            3) brightness_control ; press_enter ;;
+            4) network_manager ; press_enter ;;
+            5) safe_install_packages arandr ; press_enter ;;
+            6) nerd_fonts_install ; press_enter ;;
+            7) install_uv ; press_enter ;;
+            8) finetuning_and_optimizations ; press_enter ;;
+            9) manage_dot_files ; press_enter ;;
+            0) break ;;
+            *) error "Ungültige Auswahl." ; press_enter ;;
+        esac
+    done
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BACKUP-MENÜ
+# ─────────────────────────────────────────────────────────────────────────────
+
+menu_backup() {
+    while true; do
+        menu_header "BACKUP & WIEDERHERSTELLUNG"
+        echo ""
+        show_option "1" "Aktuellen Desktop sichern"
+        show_option "2" "Letztes Backup wiederherstellen"
+        echo ""
+        cecho "$C_DIM" "  Backup-Verzeichnis: $HOME/.desktop_backup"
+
+        if [ -d "$HOME/.desktop_backup" ]; then
+            echo ""
+            cecho "$C_DIM" "  Vorhandene Backup-Dateien:"
+            ls -lh "$HOME/.desktop_backup" 2>/dev/null | awk 'NR>1{print "    "$0}' || true
+        fi
+        echo ""
+        show_back
+        echo ""
+
+        local c; c=$(prompt_choice)
+        case "$c" in
+            1) backup_current_setup ; press_enter ;;
+            2) restore_backup ; press_enter ;;
+            0) break ;;
+            *) error "Ungültige Auswahl." ; press_enter ;;
+        esac
+    done
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SCHNELL-SETUP MENÜ
+# ─────────────────────────────────────────────────────────────────────────────
+
+menu_quick_setup() {
+    menu_header "SCHNELL-SETUP – DESIGN IN EINEM SCHRITT"
+    echo ""
+    cecho "$C_DIM" "  Wendet ein vollständiges Design-Preset auf dein System an."
+    cecho "$C_DIM" "  Alle Abhängigkeiten werden automatisch installiert."
+    echo ""
+    show_option "1" "Minimalistic   " "sauber, kein Overhead"
+    show_option "2" "Corporate      " "Arc-Theme, professionell"
+    show_option "3" "Windows XP     " "Luna-Theme, nostalgisch"
+    show_option "4" "Fsocietyhub    " "Dracula/Grün-auf-Schwarz, Hacker-Ästhetik"
+    echo ""
+    show_back
+    echo ""
+    cecho "$C_DIM" "  Aktuelles Design-Preset: $CFG_DESIGN"
+
+    local c; c=$(prompt_choice)
+    local design=""
+    case "$c" in
+        1) design="minimalistic" ;;
+        2) design="corporate" ;;
+        3) design="windows_xp" ;;
+        4) design="fsocietyhub" ;;
+        0) return ;;
+        *) error "Ungültige Auswahl." ; press_enter ; return ;;
+    esac
+
+    if confirm_action "Design '$design' anwenden? (Backups werden erstellt)"; then
+        CFG_DESIGN="$design"
+        save_settings
+        apply_design "$design"
+        press_enter
+    fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HAUPTMENÜ
+# ─────────────────────────────────────────────────────────────────────────────
+
 print_help() {
-    cat <<'EOF'
+    cat <<EOF
 Verwendung: ./custom.sh [OPTION]
 
 Optionen:
   --design <name>    Wende ein Design an (minimalistic, corporate, windows_xp, fsocietyhub)
   --restore          Stelle den zuletzt gespeicherten Desktop-Zustand wieder her
+  --status           Zeige Systemstatus und Konfiguration an
   --help             Zeige diese Hilfe an
 EOF
 }
 
-show_menu() {
-    show_fsocietyhub_banner
+show_main_menu() {
+    while true; do
+        menu_header "KALI LINUX DESKTOP CONFIGURATOR"
+        echo ""
+        show_option "1" "Schnell-Setup       " "Design-Preset in einem Schritt anwenden"
+        show_option "2" "Benutzerdefiniert   " "Jede Komponente einzeln konfigurieren"
+        show_option "3" "Status anzeigen     " "Umgebung & aktuelle Konfiguration"
+        show_option "4" "Backup / Restore    " "Einstellungen sichern oder wiederherstellen"
+        show_option "5" "Tools installieren  " "Systemtools, Fonts, Dev-Tools"
+        echo ""
+        section_line
+        show_option "0" "Beenden"
+        echo ""
 
-    echo "Wähle eine Option:"
-    echo "1) Design anwenden"
-    echo "2) Backup wiederherstellen"
-    echo "3) Beenden"
-    read -rp "Eingabe: " choice
-
-    case "$choice" in
-        1)
-            echo "Verfügbare Designs:"
-            echo "1) Minimalistic"
-            echo "2) Corporate"
-            echo "3) Windows XP"
-            echo "4) Fsocietyhub"
-            read -rp "Design wählen: " design_choice
-            case "$design_choice" in
-                1) apply_design "minimalistic" ;;
-                2) apply_design "corporate" ;;
-                3) apply_design "windows_xp" ;;
-                4) apply_design "fsocietyhub" ;;
-                *) error "Ungültige Auswahl." ;;
-            esac
-            ;;
-        2)
-            restore_backup
-            ;;
-        3)
-            log "Beende." ;;
-        *)
-            error "Ungültige Auswahl." ;;
-    esac
+        local c; c=$(prompt_choice)
+        case "$c" in
+            1) menu_quick_setup ;;
+            2) menu_custom_setup ;;
+            3) show_status ;;
+            4) menu_backup ;;
+            5) menu_tools ;;
+            0) cecho "$C_DIM" "\n  Auf Wiedersehen." ; echo "" ; exit 0 ;;
+            *) error "Ungültige Auswahl." ; press_enter ;;
+        esac
+    done
 }
 
+# ─────────────────────────────────────────────────────────────────────────────
+# EINSTIEGSPUNKT
+# ─────────────────────────────────────────────────────────────────────────────
+
 main() {
+    detect_environment
+    load_settings
+
     if [ "$#" -gt 0 ]; then
         case "$1" in
             --design)
@@ -655,6 +1639,9 @@ main() {
             --restore)
                 restore_backup
                 ;;
+            --status)
+                show_status
+                ;;
             --help|-h)
                 print_help
                 ;;
@@ -665,7 +1652,7 @@ main() {
                 ;;
         esac
     else
-        show_menu
+        show_main_menu
     fi
 }
 
