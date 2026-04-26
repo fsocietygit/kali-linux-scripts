@@ -654,6 +654,36 @@ install_system_monitoring_tools() {
     safe_install_packages btop htop glances neofetch
 }
 
+install_modern_unix_tools() {
+    log "Installiere moderne Unix-Utilities für bessere UX..."
+    
+    # fzf - fuzzy finder für interaktive Menüs
+    if ! command_exists fzf; then
+        log "Installiere fzf (fuzzy finder)..."
+        safe_install_packages fzf
+    fi
+    
+    # bat - besseres cat mit Syntax Highlighting
+    if ! command_exists bat && ! command_exists batcat; then
+        log "Installiere bat (enhanced cat)..."
+        safe_install_packages bat || safe_install_packages batcat
+    fi
+    
+    # ripgrep - schnellere Suche als grep
+    if ! command_exists rg; then
+        log "Installiere ripgrep (schnellere Suche)..."
+        safe_install_packages ripgrep
+    fi
+    
+    # delta - besseres diff
+    if ! command_exists delta; then
+        log "Installiere delta (besseres diff)..."
+        safe_install_packages git-delta || warn "delta nicht verfügbar"
+    fi
+    
+    log "Moderne Unix-Tools installiert"
+}
+
 audio_and_media_tools() {
     log "Installiere Audio- und Medientools..."
     safe_install_packages pavucontrol playerctl vlc
@@ -736,33 +766,102 @@ install_uv() {
 
 apply_design() {
     local design="$1"
-
+    local start_time=$(date +%s)
+    
     if [ "$design" = "hacker" ]; then
         log "Altes Hacker-Design wird als Kali Windows XP Mode interpretiert."
         design="windows_xp"
     fi
 
+    # Log the start
+    log_installation "START" "Installiere Design/Mode: $design"
+    
+    # Execution steps with logging
+    local steps=0
+    local total_steps=11
+    
+    debug "Schritt 1/$total_steps: Aufräumen vorheriger Installation"
     clean_previous_installation "$design"
+    log_installation "CLEANUP" "Vorherige Installation aufgeräumt"
+    ((steps++))
+    show_progress $steps $total_steps
+    
+    debug "Schritt 2/$total_steps: Backup erstellen"
     backup_current_setup
+    log_installation "BACKUP" "System-Backup erstellt"
+    ((steps++))
+    show_progress $steps $total_steps
+    
+    debug "Schritt 3/$total_steps: Abhängigkeiten installieren"
     install_custom_dependencies
+    log_installation "DEPENDENCIES" "Abhängigkeiten installiert"
+    ((steps++))
+    show_progress $steps $total_steps
+    
+    debug "Schritt 4/$total_steps: Nerd Fonts installieren"
     nerd_fonts_install
+    log_installation "FONTS" "Nerd Fonts installiert"
+    ((steps++))
+    show_progress $steps $total_steps
+    
+    debug "Schritt 5/$total_steps: Themes & Icons installieren"
     themes_and_icons_install "$design"
+    log_installation "THEMES" "Themes & Icons für $design installiert"
+    ((steps++))
+    show_progress $steps $total_steps
+    
+    debug "Schritt 6/$total_steps: Themes & Icons aktivieren"
     activate_themes_and_icons "$design" || true
+    log_installation "ACTIVATE_THEMES" "Themes & Icons aktiviert"
+    ((steps++))
+    show_progress $steps $total_steps
+    
+    debug "Schritt 7/$total_steps: Desktop-Umgebung anpassen"
     customize_desktop_environment "$design"
+    log_installation "DESKTOP_ENV" "Desktop-Umgebung angepasst"
+    ((steps++))
+    show_progress $steps $total_steps
+    
+    debug "Schritt 8/$total_steps: Alacritty konfigurieren"
     install_and_config_alacritty "$design"
+    log_installation "ALACRITTY" "Alacritty konfiguriert"
+    ((steps++))
+    show_progress $steps $total_steps
+    
+    debug "Schritt 9/$total_steps: Monitoring-Tools installieren"
     install_system_monitoring_tools
+    log_installation "MONITORING" "System-Monitoring-Tools installiert"
+    ((steps++))
+    show_progress $steps $total_steps
+    
+    debug "Schritt 10/$total_steps: Audio & Media Tools installieren"
     audio_and_media_tools
+    log_installation "MEDIA" "Audio & Media Tools installiert"
+    ((steps++))
+    show_progress $steps $total_steps
+    
+    debug "Schritt 11/$total_steps: Systemoptimierung"
     brightness_control
     network_manager
     finetuning_and_optimizations
     manage_dot_files
     install_uv
+    log_installation "OPTIMIZATION" "Systemoptimierung abgeschlossen"
+    ((steps++))
+    show_progress $steps $total_steps
     
     # Track installation
     track_installation "$design"
-
-    cecho "$C_BGREEN" "\n  ✔ Design '$design' erfolgreich angewendet."
-    cecho "$C_YELLOW" "  Bitte starte deine Sitzung neu, um alle Änderungen zu übernehmen."
+    
+    # Calculate duration
+    local end_time=$(date +%s)
+    local duration=$((end_time - start_time))
+    
+    log_installation "COMPLETE" "Installation erfolgreich (Dauer: ${duration}s)"
+    
+    # Show completion report
+    echo ""
+    create_installation_summary "$design" "$duration"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1875,6 +1974,9 @@ menu_tools() {
     while true; do
         menu_header "TOOLS VERWALTEN"
         echo ""
+        cecho "$C_YELLOW" "  ── Moderne Unix-Utilities (Enhanced UX) ──────────────"
+        show_option "0" "fzf / bat / ripgrep / delta       installieren"
+        echo ""
         cecho "$C_YELLOW" "  ── Systemüberwachung ───────────────────────────────"
         show_option "1" "btop / htop / glances / neofetch  installieren"
         echo ""
@@ -1893,12 +1995,14 @@ menu_tools() {
         cecho "$C_YELLOW" "  ── Wartung ─────────────────────────────────────────"
         show_option "8" "Systembereinigung (autoremove/clean)"
         show_option "9" "Dotfiles verwalten (git bare repo)"
+        show_option "10" "Installation-Report anzeigen"
         echo ""
         show_back
         echo ""
 
         local c; c=$(prompt_choice)
         case "$c" in
+            0) install_modern_unix_tools ; press_enter ;;
             1) install_system_monitoring_tools ; press_enter ;;
             2) audio_and_media_tools ; press_enter ;;
             3) brightness_control ; press_enter ;;
@@ -1908,7 +2012,7 @@ menu_tools() {
             7) install_uv ; press_enter ;;
             8) finetuning_and_optimizations ; press_enter ;;
             9) manage_dot_files ; press_enter ;;
-            0) break ;;
+            10) show_installation_report ; press_enter ;;
             *) error "Ungültige Auswahl." ; press_enter ;;
         esac
     done
@@ -2206,6 +2310,9 @@ main() {
                     local mode_desc=$(grep "^MODE_DESC=" "$MODES_DIR/${mode}.conf" 2>/dev/null | cut -d'=' -f2 | tr -d '"')
                     printf "  %-15s %s\n" "$mode" "$mode_desc"
                 done < <(list_kali_modes)
+                ;;
+            --report)
+                show_installation_report
                 ;;
             --help|-h)
                 print_help
