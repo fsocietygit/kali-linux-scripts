@@ -331,16 +331,34 @@ customize_desktop_environment() {
     local design="$1"
     log "Passe Desktop-Umgebung für '$design' an..."
 
-    local wallpaper_path="$HOME/Pictures/wallpaper.jpg"
-    if [ "$design" = "windows_xp" ] || [ "$design" = "hacker" ]; then
-        wallpaper_path="$HOME/Pictures/kali_windows_xp_wallpaper.jpg"
-    fi
-    if [ "$design" = "fsocietyhub" ]; then
-        wallpaper_path="$HOME/Pictures/fsociety_wallpaper.jpg"
-        if ! [ -f "$wallpaper_path" ]; then
-            local wallpaper_url="https://wallpapercave.com/wp/wp4507663.jpg"
-            download_file "$wallpaper_url" "$wallpaper_path"
-        fi
+    local wallpaper_path
+    local wallpaper_url
+
+    case "$design" in
+        minimalistic)
+            wallpaper_path="$HOME/Pictures/minimalistic_wallpaper.jpg"
+            wallpaper_url="https://w.wallhaven.cc/full/5w/wallhaven-5wzvq1.jpg"
+            ;;
+        corporate)
+            wallpaper_path="$HOME/Pictures/corporate_wallpaper.jpg"
+            wallpaper_url="https://w.wallhaven.cc/full/o3/wallhaven-o3y1v7.jpg"
+            ;;
+        windows_xp)
+            wallpaper_path="$HOME/Pictures/windows_xp_wallpaper.jpg"
+            wallpaper_url="https://upload.wikimedia.org/wikipedia/commons/0/0c/Bliss_%28Windows_XP%29.jpg"
+            ;;
+        fsocietyhub)
+            wallpaper_path="$HOME/Pictures/fsociety_wallpaper.jpg"
+            wallpaper_url="https://w.wallhaven.cc/full/48/wallhaven-48q6yj.jpg"
+            ;;
+        *)
+            wallpaper_path="$HOME/Pictures/wallpaper.jpg"
+            wallpaper_url=""
+            ;;
+    esac
+
+    if [ -n "$wallpaper_url" ] && ! [ -f "$wallpaper_path" ]; then
+        download_file "$wallpaper_url" "$wallpaper_path"
     fi
 
     if [ -n "${DISPLAY-}" ] && command_exists feh && [ -f "$wallpaper_path" ]; then
