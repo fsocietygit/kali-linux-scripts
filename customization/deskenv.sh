@@ -297,49 +297,10 @@ nerd_fonts_install() {
     fi
 }
 
-themes_and_icons_install() {
-    local design="$1"
-    log "Installiere Themes und Icons für '$design'..."
-
-    local themes_dir="$HOME/.themes"
-    local icons_dir="$HOME/.icons"
-
-    mkdir -p "$themes_dir" "$icons_dir"
-
-    case "$design" in
-        minimalistic)
-            safe_install_packages gnome-themes-extra
-            ;;
-        corporate)
-            safe_install_packages arc-theme papirus-icon-theme
-            ;;
-        windows_xp|hacker)
-            safe_install_packages papirus-icon-theme gtk2-engines gtk2-engines-pixbuf
-            local xp_theme_url="https://github.com/B00merang-Project/Windows-XP/archive/refs/heads/master.zip"
-            local xp_theme_zip="$themes_dir/windows-xp.zip"
-            if download_file "$xp_theme_url" "$xp_theme_zip"; then
-                extract_zip "$xp_theme_zip" "$themes_dir"
-                rm -f "$xp_theme_zip"
-                if [ -d "$themes_dir/Windows-XP-master/Windows XP Luna" ]; then
-                    mv "$themes_dir/Windows-XP-master/Windows XP Luna" "$themes_dir/Windows XP Luna" 2>/dev/null || true
-                fi
-                rm -rf "$themes_dir/Windows-XP-master"
-            fi
-            ;;
-        fsocietyhub)
-            safe_install_packages papirus-icon-theme
-            local fsociety_theme_url="https://github.com/dracula/gtk/archive/refs/heads/master.zip"
-            local fsociety_theme_zip="$themes_dir/fsocietyhub.zip"
-            if download_file "$fsociety_theme_url" "$fsociety_theme_zip"; then
-                extract_zip "$fsociety_theme_zip" "$themes_dir"
-                rm -f "$fsociety_theme_zip"
-            fi
-            ;;
-        *)
-            error "Unbekanntes Design: $design"
-            return 1
-            ;;
-    esac
+install_visual_customization_assets() {
+    log "Installiere Basis-Assets für Desktop-Customization..."
+    mkdir -p "$HOME/.themes" "$HOME/.icons"
+    safe_install_packages papirus-icon-theme gnome-themes-extra arc-theme gtk2-engines gtk2-engines-pixbuf
 }
 
 split_gsettings_key() {
@@ -381,36 +342,21 @@ set_gsettings_theme() {
     fi
 }
 
-activate_themes_and_icons() {
-    local design="$1"
-    log "Aktiviere Themes und Icons für '$design'..."
+ensure_window_controls() {
+    # Stellt sicher, dass Schließen/Minimieren/Maximieren auch bei maximierten Fenstern sichtbar bleiben.
+    local layout=':minimize,maximize,close'
 
-    case "$design" in
-        minimalistic)
-            set_gsettings_theme "org.gnome.desktop.interface gtk-theme" "Adwaita"
-            set_gsettings_theme "org.gnome.desktop.interface icon-theme" "Adwaita"
-            set_gsettings_theme "org.gnome.desktop.wm.preferences theme" "Adwaita"
-            ;;
-        corporate)
-            set_gsettings_theme "org.gnome.desktop.interface gtk-theme" "Arc"
-            set_gsettings_theme "org.gnome.desktop.interface icon-theme" "Papirus"
-            set_gsettings_theme "org.gnome.desktop.wm.preferences theme" "Arc"
-            ;;
-        windows_xp|hacker)
-            set_gsettings_theme "org.gnome.desktop.interface gtk-theme" "Windows XP Luna"
-            set_gsettings_theme "org.gnome.desktop.interface icon-theme" "Papirus"
-            set_gsettings_theme "org.gnome.desktop.wm.preferences theme" "Windows XP Luna"
-            ;;
-        fsocietyhub)
-            set_gsettings_theme "org.gnome.desktop.interface gtk-theme" "gtk-master"
-            set_gsettings_theme "org.gnome.desktop.interface icon-theme" "Papirus-Dark"
-            set_gsettings_theme "org.gnome.desktop.wm.preferences theme" "gtk-master"
-            ;;
-        *)
-            error "Unbekanntes Design: $design"
-            return 1
-            ;;
-    esac
+    if ! gsettings_available; then
+        return 0
+    fi
+
+    if gsettings writable org.gnome.desktop.wm.preferences button-layout >/dev/null 2>&1; then
+        gsettings set org.gnome.desktop.wm.preferences button-layout "$layout" >/dev/null 2>&1 || true
+    fi
+
+    if gsettings writable org.gnome.desktop.interface gtk-decoration-layout >/dev/null 2>&1; then
+        gsettings set org.gnome.desktop.interface gtk-decoration-layout "$layout" >/dev/null 2>&1 || true
+    fi
 }
 
 apply_wallpaper() {
@@ -461,19 +407,18 @@ apply_wallpaper() {
 }
 
 config_i3_or_sway() {
-    local design="$1"
     local terminal_cmd="${CFG_TERMINAL:-alacritty}"
     local font_name="${CFG_FONT:-FiraCode Nerd Font}"
     local font_size="${CFG_FONT_SIZE:-10}"
 
-    log "Konfiguriere i3/Sway für '$design'..."
+    log "Konfiguriere i3/Sway..."
 
     if command_exists i3; then
         mkdir -p "$HOME/.config/i3"
         cat > "$HOME/.config/i3/config" <<EOF
-set $mod Mod4
+set \$mod Mod4
 font pango:${font_name} ${font_size}
-bindsym $mod+Return exec ${terminal_cmd}
+bindsym \$mod+Return exec ${terminal_cmd}
 exec --no-startup-id picom -b
 EOF
     fi
@@ -481,9 +426,9 @@ EOF
     if command_exists sway; then
         mkdir -p "$HOME/.config/sway"
         cat > "$HOME/.config/sway/config" <<EOF
-set $mod Mod4
+set \$mod Mod4
 font pango:${font_name} ${font_size}
-bindsym $mod+Return exec ${terminal_cmd}
+bindsym \$mod+Return exec ${terminal_cmd}
 EOF
         mkdir -p "$HOME/.config/waybar"
         cat > "$HOME/.config/waybar/config" <<'EOF'
@@ -499,40 +444,11 @@ EOF
 }
 
 customize_desktop_environment() {
-    local design="$1"
-    log "Passe Desktop-Umgebung für '$design' an..."
+    log "Passe Desktop-Umgebung an..."
 
-    local wallpaper_path
-    local wallpaper_url
+    local wallpaper_path="$HOME/Pictures/wallpaper.jpg"
 
     mkdir -p "$HOME/Pictures"
-
-    case "$design" in
-        minimalistic)
-            wallpaper_path="$HOME/Pictures/minimalistic_wallpaper.jpg"
-            wallpaper_url="https://w.wallhaven.cc/full/5w/wallhaven-5wzvq1.jpg"
-            ;;
-        corporate)
-            wallpaper_path="$HOME/Pictures/corporate_wallpaper.jpg"
-            wallpaper_url="https://w.wallhaven.cc/full/o3/wallhaven-o3y1v7.jpg"
-            ;;
-        windows_xp)
-            wallpaper_path="$HOME/Pictures/windows_xp_wallpaper.jpg"
-            wallpaper_url="https://upload.wikimedia.org/wikipedia/commons/0/0c/Bliss_%28Windows_XP%29.jpg"
-            ;;
-        fsocietyhub)
-            wallpaper_path="$HOME/Pictures/fsociety_wallpaper.jpg"
-            wallpaper_url="https://w.wallhaven.cc/full/48/wallhaven-48q6yj.jpg"
-            ;;
-        *)
-            wallpaper_path="$HOME/Pictures/wallpaper.jpg"
-            wallpaper_url=""
-            ;;
-    esac
-
-    if [ -n "$wallpaper_url" ] && ! [ -f "$wallpaper_path" ]; then
-        download_file "$wallpaper_url" "$wallpaper_path" || warn "Wallpaper konnte nicht heruntergeladen werden: $wallpaper_url"
-    fi
 
     if [ -f "$wallpaper_path" ]; then
         apply_wallpaper "$wallpaper_path" || true
@@ -562,126 +478,12 @@ configuration {
 EOF
     fi
 
-    config_i3_or_sway "$design"
-}
-
-install_and_config_alacritty() {
-    local design="$1"
-    log "Installiere und konfiguriere Alacritty für '$design'..."
-    safe_install_packages alacritty
-
-    mkdir -p "$HOME/.config/alacritty"
-    case "$design" in
-        minimalistic)
-            cat > "$HOME/.config/alacritty/alacritty.yml" <<'EOF'
-font:
-  normal:
-    family: "Monospace"
-    style: Regular
-  size: 12.0
-window:
-  padding:
-    x: 5
-    y: 5
-  opacity: 1.0
-EOF
-            ;;
-        corporate)
-            cat > "$HOME/.config/alacritty/alacritty.yml" <<'EOF'
-font:
-  normal:
-    family: "DejaVu Sans Mono"
-    style: Regular
-  size: 10.0
-window:
-  padding:
-    x: 10
-    y: 10
-  opacity: 0.9
-EOF
-            ;;
-        windows_xp|hacker)
-            cat > "$HOME/.config/alacritty/alacritty.yml" <<'EOF'
-font:
-  normal:
-    family: "Tahoma"
-    style: Regular
-  size: 11.0
-colors:
-  primary:
-    background: '0xC0C0C0'
-    foreground: '0x000000'
-  cursor:
-    text: '0x000000'
-    cursor: '0xFFFFFF'
-window:
-  padding:
-    x: 10
-    y: 10
-  opacity: 0.95
-EOF
-            ;;
-        fsocietyhub)
-            cat > "$HOME/.config/alacritty/alacritty.yml" <<'EOF'
-font:
-  normal:
-    family: "FiraCode Nerd Font"
-    style: Regular
-  size: 11.0
-colors:
-  primary:
-    background: '0x000000'
-    foreground: '0x00FF00'
-  cursor:
-    text: '0x000000'
-    cursor: '0xFF0000'
-window:
-  padding:
-    x: 10
-    y: 10
-  opacity: 0.95
-EOF
-            ;;
-        *)
-            error "Unbekanntes Design: $design"
-            return 1
-            ;;
-    esac
+        config_i3_or_sway
 }
 
 install_system_monitoring_tools() {
     log "Installiere Systemüberwachungstools..."
     safe_install_packages btop htop glances neofetch
-}
-
-install_modern_unix_tools() {
-    log "Installiere moderne Unix-Utilities für bessere UX..."
-    
-    # fzf - fuzzy finder für interaktive Menüs
-    if ! command_exists fzf; then
-        log "Installiere fzf (fuzzy finder)..."
-        safe_install_packages fzf
-    fi
-    
-    # bat - besseres cat mit Syntax Highlighting
-    if ! command_exists bat && ! command_exists batcat; then
-        log "Installiere bat (enhanced cat)..."
-        safe_install_packages bat || safe_install_packages batcat
-    fi
-    
-    # ripgrep - schnellere Suche als grep
-    if ! command_exists rg; then
-        log "Installiere ripgrep (schnellere Suche)..."
-        safe_install_packages ripgrep
-    fi
-    
-    # delta - besseres diff
-    if ! command_exists delta; then
-        log "Installiere delta (besseres diff)..."
-        safe_install_packages git-delta || warn "delta nicht verfügbar"
-    fi
-    
-    log "Moderne Unix-Tools installiert"
 }
 
 audio_and_media_tools() {
@@ -762,106 +564,6 @@ install_uv() {
     python3 -m pip install --user uv --break-system-packages >/dev/null 2>&1 \
         || python3 -m pip install --user uv >/dev/null 2>&1 \
         || warn "uv konnte nicht installiert werden."
-}
-
-apply_design() {
-    local design="$1"
-    local start_time=$(date +%s)
-    
-    if [ "$design" = "hacker" ]; then
-        log "Altes Hacker-Design wird als Kali Windows XP Mode interpretiert."
-        design="windows_xp"
-    fi
-
-    # Log the start
-    log_installation "START" "Installiere Design/Mode: $design"
-    
-    # Execution steps with logging
-    local steps=0
-    local total_steps=11
-    
-    debug "Schritt 1/$total_steps: Aufräumen vorheriger Installation"
-    clean_previous_installation "$design"
-    log_installation "CLEANUP" "Vorherige Installation aufgeräumt"
-    ((steps++))
-    show_progress $steps $total_steps
-    
-    debug "Schritt 2/$total_steps: Backup erstellen"
-    backup_current_setup
-    log_installation "BACKUP" "System-Backup erstellt"
-    ((steps++))
-    show_progress $steps $total_steps
-    
-    debug "Schritt 3/$total_steps: Abhängigkeiten installieren"
-    install_custom_dependencies
-    log_installation "DEPENDENCIES" "Abhängigkeiten installiert"
-    ((steps++))
-    show_progress $steps $total_steps
-    
-    debug "Schritt 4/$total_steps: Nerd Fonts installieren"
-    nerd_fonts_install
-    log_installation "FONTS" "Nerd Fonts installiert"
-    ((steps++))
-    show_progress $steps $total_steps
-    
-    debug "Schritt 5/$total_steps: Themes & Icons installieren"
-    themes_and_icons_install "$design"
-    log_installation "THEMES" "Themes & Icons für $design installiert"
-    ((steps++))
-    show_progress $steps $total_steps
-    
-    debug "Schritt 6/$total_steps: Themes & Icons aktivieren"
-    activate_themes_and_icons "$design" || true
-    log_installation "ACTIVATE_THEMES" "Themes & Icons aktiviert"
-    ((steps++))
-    show_progress $steps $total_steps
-    
-    debug "Schritt 7/$total_steps: Desktop-Umgebung anpassen"
-    customize_desktop_environment "$design"
-    log_installation "DESKTOP_ENV" "Desktop-Umgebung angepasst"
-    ((steps++))
-    show_progress $steps $total_steps
-    
-    debug "Schritt 8/$total_steps: Alacritty konfigurieren"
-    install_and_config_alacritty "$design"
-    log_installation "ALACRITTY" "Alacritty konfiguriert"
-    ((steps++))
-    show_progress $steps $total_steps
-    
-    debug "Schritt 9/$total_steps: Monitoring-Tools installieren"
-    install_system_monitoring_tools
-    log_installation "MONITORING" "System-Monitoring-Tools installiert"
-    ((steps++))
-    show_progress $steps $total_steps
-    
-    debug "Schritt 10/$total_steps: Audio & Media Tools installieren"
-    audio_and_media_tools
-    log_installation "MEDIA" "Audio & Media Tools installiert"
-    ((steps++))
-    show_progress $steps $total_steps
-    
-    debug "Schritt 11/$total_steps: Systemoptimierung"
-    brightness_control
-    network_manager
-    finetuning_and_optimizations
-    manage_dot_files
-    install_uv
-    log_installation "OPTIMIZATION" "Systemoptimierung abgeschlossen"
-    ((steps++))
-    show_progress $steps $total_steps
-    
-    # Track installation
-    track_installation "$design"
-    
-    # Calculate duration
-    local end_time=$(date +%s)
-    local duration=$((end_time - start_time))
-    
-    log_installation "COMPLETE" "Installation erfolgreich (Dauer: ${duration}s)"
-    
-    # Show completion report
-    echo ""
-    create_installation_summary "$design" "$duration"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -959,11 +661,8 @@ detect_environment() {
 
 SETTINGS_DIR="$HOME/.config/kali-desktop"
 SETTINGS_FILE="$SETTINGS_DIR/settings.conf"
-INSTALL_TRACKER_FILE="$SETTINGS_DIR/installed.conf"
-MODES_DIR="$SETTINGS_DIR/modes"
 
 # Aktuelle Konfigurationswerte (Defaults)
-CFG_DESIGN="fsocietyhub"
 CFG_WM="auto"
 CFG_COMPOSITOR="picom"
 CFG_TERMINAL="alacritty"
@@ -986,7 +685,6 @@ load_settings() {
             [[ -z "$key" ]] && continue
             value="${value//\"/}"
             case "$key" in
-                CFG_DESIGN)       CFG_DESIGN="$value" ;;
                 CFG_WM)           CFG_WM="$value" ;;
                 CFG_COMPOSITOR)   CFG_COMPOSITOR="$value" ;;
                 CFG_TERMINAL)     CFG_TERMINAL="$value" ;;
@@ -1008,7 +706,6 @@ save_settings() {
     mkdir -p "$SETTINGS_DIR"
     cat > "$SETTINGS_FILE" <<EOF
 # Kali Desktop Konfiguration – gespeichert am $(date)
-CFG_DESIGN="$CFG_DESIGN"
 CFG_WM="$CFG_WM"
 CFG_COMPOSITOR="$CFG_COMPOSITOR"
 CFG_TERMINAL="$CFG_TERMINAL"
@@ -1026,170 +723,10 @@ EOF
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# INSTALLATION TRACKING & KALI MODES MANAGEMENT
-# ─────────────────────────────────────────────────────────────────────────────
-
-track_installation() {
-    local mode="$1"
-    local timestamp="$(date '+%Y-%m-%d %H:%M:%S')"
-    
-    mkdir -p "$SETTINGS_DIR"
-    
-    # Append to installation tracker
-    echo "${mode}|${timestamp}|installed" >> "$INSTALL_TRACKER_FILE"
-    log "Installation von '$mode' getracked: $INSTALL_TRACKER_FILE"
-}
-
-get_installed_modes() {
-    if [ ! -f "$INSTALL_TRACKER_FILE" ]; then
-        return
-    fi
-    
-    awk -F'|' '$3 == "installed" {print $1}' "$INSTALL_TRACKER_FILE" | sort -u
-}
-
-is_mode_installed() {
-    local mode="$1"
-    if [ ! -f "$INSTALL_TRACKER_FILE" ]; then
-        return 1
-    fi
-    
-    grep -q "^${mode}|" "$INSTALL_TRACKER_FILE" && return 0
-    return 1
-}
-
-clean_previous_installation() {
-    local new_mode="$1"
-    
-    log "Bereite vorherige Installation auf für neuen Mode: $new_mode"
-    
-    # Remove old theme configs if switching modes
-    if [ -d "$HOME/.config/i3" ]; then
-        rm -rf "$HOME/.config/i3" || true
-    fi
-    
-    if [ -d "$HOME/.config/sway" ]; then
-        rm -rf "$HOME/.config/sway" || true
-    fi
-    
-    if [ -d "$HOME/.config/alacritty" ]; then
-        rm -rf "$HOME/.config/alacritty" || true
-    fi
-    
-    log "Aufräumen abgeschlossen."
-}
-
-# Define Kali Modes with presets
-define_kali_modes() {
-    mkdir -p "$MODES_DIR"
-    
-    # PENTESTER MODE - Max security tools, minimal eye candy
-    cat > "$MODES_DIR/pentester.conf" <<'EOF'
-MODE_NAME="Pentester"
-MODE_DESC="Optimiert für Penetrationstests – Sicherheitstools, minimalistische GUI"
-CFG_DESIGN="minimalistic"
-CFG_WM="i3"
-CFG_COMPOSITOR="picom"
-CFG_TERMINAL="alacritty"
-CFG_LAUNCHER="rofi"
-CFG_BAR="polybar"
-CFG_NOTIFICATIONS="dunst"
-CFG_GTK_THEME="Adwaita"
-CFG_ICON_THEME="Papirus"
-EOF
-    
-    # CORPORATE MODE - Professional look
-    cat > "$MODES_DIR/corporate.conf" <<'EOF'
-MODE_NAME="Corporate"
-MODE_DESC="Professionelle Umgebung – Arc-Theme, standardisiert"
-CFG_DESIGN="corporate"
-CFG_WM="auto"
-CFG_COMPOSITOR="picom"
-CFG_TERMINAL="gnome-terminal"
-CFG_LAUNCHER="rofi"
-CFG_BAR="waybar"
-CFG_NOTIFICATIONS="mako"
-CFG_GTK_THEME="Arc"
-CFG_ICON_THEME="Papirus"
-EOF
-    
-    # FSOCIETY MODE - Dark, Hacker-style
-    cat > "$MODES_DIR/fsociety.conf" <<'EOF'
-MODE_NAME="Fsociety"
-MODE_DESC="Hacker-Ästhetik – Dracula-Theme, grün-auf-schwarz"
-CFG_DESIGN="fsocietyhub"
-CFG_WM="i3"
-CFG_COMPOSITOR="picom"
-CFG_TERMINAL="alacritty"
-CFG_LAUNCHER="rofi"
-CFG_BAR="polybar"
-CFG_NOTIFICATIONS="dunst"
-CFG_GTK_THEME="Dracula"
-CFG_ICON_THEME="Papirus-Dark"
-EOF
-    
-    # XFCE MODE - Lightweight, classic
-    cat > "$MODES_DIR/xfce.conf" <<'EOF'
-MODE_NAME="XFCE Classic"
-MODE_DESC="Leichtgewichtig – XFCE mit Standardkomponenten"
-CFG_DESIGN="minimalistic"
-CFG_WM="xfwm4"
-CFG_COMPOSITOR="keiner"
-CFG_TERMINAL="xfce4-terminal"
-CFG_LAUNCHER="rofi"
-CFG_BAR="xfce4-panel"
-CFG_NOTIFICATIONS="xfce4-notifyd"
-CFG_GTK_THEME="Adwaita"
-CFG_ICON_THEME="Papirus"
-EOF
-    
-    log "Kali Modes definiert in: $MODES_DIR"
-}
-
-load_kali_mode() {
-    local mode="$1"
-    local mode_file="$MODES_DIR/${mode}.conf"
-    
-    if [ ! -f "$mode_file" ]; then
-        error "Modus-Datei nicht gefunden: $mode_file"
-        return 1
-    fi
-    
-    log "Lade Kali Mode: $mode"
-    source "$mode_file"
-}
-
-list_kali_modes() {
-    local modes=()
-    if [ -d "$MODES_DIR" ]; then
-        for f in "$MODES_DIR"/*.conf; do
-            [ -f "$f" ] && modes+=("$(basename "$f" .conf)")
-        done
-    fi
-    printf '%s\n' "${modes[@]}"
-}
-
-get_mode_info() {
-    local mode="$1"
-    local mode_file="$MODES_DIR/${mode}.conf"
-    
-    if [ ! -f "$mode_file" ]; then
-        return 1
-    fi
-    
-    while IFS='=' read -r key value; do
-        [[ "$key" =~ ^[[:space:]]*# ]] && continue
-        [[ -z "$key" ]] && continue
-        value="${value//\"/}"
-        echo "${key}=${value}"
-    done < "$mode_file"
-}
-
-# ─────────────────────────────────────────────────────────────────────────────
 # BANNER & MENÜ-HELFER
 # ─────────────────────────────────────────────────────────────────────────────
 
-show_fsocietyhub_banner() {
+show_main_banner() {
     echo -e "${C_BGREEN}"
     cat <<'EOF'
 ███████╗███████╗ ██████╗  ██████╗██╗███████╗████████╗██╗   ██╗██╗  ██╗██╗   ██╗██████╗
@@ -1207,7 +744,7 @@ menu_header() {
     if is_interactive; then
         clear
     fi
-    show_fsocietyhub_banner
+    show_main_banner
     header_line
     cecho "$C_BCYAN" "  $title"
     cecho "$C_DIM" "  System: $ENV_DISTRO  |  DE: $ENV_DE  |  WM: $ENV_WM  |  $ENV_DISPLAY_SERVER"
@@ -1302,7 +839,6 @@ show_status() {
 
     echo ""
     cecho "$C_BCYAN" "  ── Gespeicherte Konfiguration ─────────────────────────"
-    echo -e "  ${C_DIM}Design-Preset:${C_RESET}   $CFG_DESIGN"
     echo -e "  ${C_DIM}Window Manager:${C_RESET}  $CFG_WM"
     echo -e "  ${C_DIM}Compositor:${C_RESET}      $CFG_COMPOSITOR"
     echo -e "  ${C_DIM}Terminal:${C_RESET}        $CFG_TERMINAL"
@@ -1314,24 +850,6 @@ show_status() {
     echo -e "  ${C_DIM}GTK Theme:${C_RESET}       $CFG_GTK_THEME"
     echo -e "  ${C_DIM}Icon Theme:${C_RESET}      $CFG_ICON_THEME"
     echo -e "  ${C_DIM}Schrift:${C_RESET}         $CFG_FONT $CFG_FONT_SIZE"
-
-    echo ""
-    cecho "$C_BCYAN" "  ── Installierte Kali Modes ────────────────────────────"
-    local installed_modes=$(get_installed_modes)
-    if [ -z "$installed_modes" ]; then
-        echo -e "  ${C_DIM}Keine Modi installiert. Wende einen Mode an, um zu beginnen.${C_RESET}"
-    else
-        echo "$installed_modes" | while read -r mode; do
-            echo -e "  ${C_BGREEN}✔${C_RESET} $mode"
-        done
-    fi
-
-    echo ""
-    cecho "$C_BCYAN" "  ── Verfügbare Kali Modes ──────────────────────────────"
-    while IFS= read -r mode; do
-        local mode_name=$(grep "^MODE_NAME=" "$MODES_DIR/${mode}.conf" 2>/dev/null | cut -d'=' -f2 | tr -d '"')
-        echo -e "  • $mode_name ($mode)"
-    done < <(list_kali_modes)
 
     echo ""
     cecho "$C_BCYAN" "  ── Installierte Tools ─────────────────────────────────"
@@ -1413,14 +931,50 @@ menu_select_wm() {
     press_enter
 }
 
+# Helper function to detect available compositors
+detect_available_compositors() {
+    local -a available=()
+    
+    if command_exists picom; then
+        available+=("picom")
+    fi
+    
+    if command_exists compton; then
+        available+=("compton")
+    fi
+    
+    if command_exists xcompmgr; then
+        available+=("xcompmgr")
+    fi
+    
+    # Built-in compositors (KWin, Mutter, XFCE)
+    if pgrep -x "kwin_x11" >/dev/null 2>&1 || pgrep -x "kwin_wayland" >/dev/null 2>&1; then
+        available+=("KWin")
+    fi
+    
+    if pgrep -x "mutter" >/dev/null 2>&1; then
+        available+=("Mutter")
+    fi
+    
+    if pgrep -x "xfwm4" >/dev/null 2>&1; then
+        available+=("XFWM4")
+    fi
+    
+    echo "${available[*]}"
+}
+
 menu_select_compositor() {
     menu_header "COMPOSITOR AUSWÄHLEN"
     echo ""
-    show_option "1" "picom          " "empfohlen für X11"
-    show_option "2" "compton        " "älterer picom-Fork"
-    show_option "3" "xcompmgr       " "minimal"
-    show_option "4" "eingebaut      " "z.B. KWin, Mutter"
-    show_option "5" "keiner         " "kein Compositor"
+    cecho "$C_DIM" "  System: $ENV_DISTRO  |  DE: $ENV_DE  |  WM: $ENV_WM  |  $ENV_DISPLAY_SERVER"
+    echo ""
+    
+    # Compositor options with better descriptions
+    show_option "1" "picom" "empfohlen für X11 (moderne Effekte, guter Performance-Kompromiss)"
+    show_option "2" "compton" "älterer picom-Fork (stabil, aber weniger Features)"
+    show_option "3" "xcompmgr" "minimal (nur grundlegende Compositing-Funktionen)"
+    show_option "4" "eingebaut" "Desktop-eigener Compositor (KWin, Mutter, XFCE)"
+    show_option "5" "keiner" "kein Compositor (maximale Performance, keine Effekte)"
     echo ""
     show_back
     echo ""
@@ -1684,6 +1238,7 @@ menu_select_gtk_theme() {
     cecho "$C_BGREEN" "  ✔ GTK-Theme gesetzt: $CFG_GTK_THEME"
     if gsettings_available; then
         gsettings set org.gnome.desktop.interface gtk-theme "$CFG_GTK_THEME" 2>/dev/null || true
+        ensure_window_controls
     fi
     save_settings
     press_enter
@@ -1793,17 +1348,89 @@ menu_select_font() {
 # BENUTZERDEFINIERTES SETUP-MENÜ
 # ─────────────────────────────────────────────────────────────────────────────
 
+resolve_effective_custom_values() {
+    local wm="$CFG_WM"
+    local bar="$CFG_BAR"
+    local gtk_theme="$CFG_GTK_THEME"
+    local icon_theme="$CFG_ICON_THEME"
+
+    if [ "$wm" = "auto" ]; then
+        if [ "$ENV_DISPLAY_SERVER" = "Wayland" ]; then
+            wm="sway"
+        else
+            wm="i3"
+        fi
+    fi
+
+    if [ "$bar" = "auto" ]; then
+        if [ "$ENV_DISPLAY_SERVER" = "Wayland" ]; then
+            bar="waybar"
+        else
+            bar="polybar"
+        fi
+    fi
+
+    [ "$gtk_theme" = "auto" ] && gtk_theme="Adwaita"
+    [ "$icon_theme" = "auto" ] && icon_theme="Papirus"
+
+    printf '%s\n%s\n%s\n%s\n' "$wm" "$bar" "$gtk_theme" "$icon_theme"
+}
+
+show_custom_compatibility_warnings() {
+    local effective_wm="$1"
+    local effective_bar="$2"
+
+    if [ "$ENV_DISPLAY_SERVER" = "Wayland" ] && [[ "$CFG_COMPOSITOR" =~ ^(picom|compton|xcompmgr)$ ]]; then
+        cecho "$C_YELLOW" "  ⚠ Hinweis: '$CFG_COMPOSITOR' ist X11-orientiert und unter Wayland oft wirkungslos."
+    fi
+
+    if [ "$ENV_DISPLAY_SERVER" = "Wayland" ] && [ "$CFG_WALLPAPER_TOOL" = "feh" ]; then
+        cecho "$C_YELLOW" "  ⚠ Hinweis: 'feh' setzt Wallpaper nur unter X11. Nutze auf Wayland besser 'swaybg' oder 'variety'."
+    fi
+
+    if [ "$ENV_DISPLAY_SERVER" = "X11" ] && [ "$CFG_WALLPAPER_TOOL" = "swaybg" ]; then
+        cecho "$C_YELLOW" "  ⚠ Hinweis: 'swaybg' ist Wayland-spezifisch. Unter X11 sind 'feh' oder 'nitrogen' besser."
+    fi
+
+    if [ "$ENV_DISPLAY_SERVER" = "X11" ] && [ "$CFG_LAUNCHER" = "wofi" ]; then
+        cecho "$C_YELLOW" "  ⚠ Hinweis: 'wofi' ist primär für Wayland gedacht. Unter X11 ist 'rofi' oft stabiler."
+    fi
+
+    if [ "$ENV_DISPLAY_SERVER" = "Wayland" ] && [ "$effective_bar" = "polybar" ]; then
+        cecho "$C_YELLOW" "  ⚠ Hinweis: 'polybar' ist auf Wayland eingeschränkt. Für Wayland ist 'waybar' empfohlen."
+    fi
+
+    if [ "$ENV_DISPLAY_SERVER" = "X11" ] && [ "$effective_wm" = "sway" ]; then
+        cecho "$C_YELLOW" "  ⚠ Hinweis: 'sway' benötigt Wayland. Unter X11 ist z. B. 'i3' die passendere Wahl."
+    fi
+}
+
 apply_custom_config() {
+    local _effective_values=()
+    local effective_wm
+    local effective_bar
+    local effective_gtk_theme
+    local effective_icon_theme
+
+    mapfile -t _effective_values < <(resolve_effective_custom_values)
+    effective_wm="${_effective_values[0]}"
+    effective_bar="${_effective_values[1]}"
+    effective_gtk_theme="${_effective_values[2]}"
+    effective_icon_theme="${_effective_values[3]}"
+
     menu_header "BENUTZERDEFINIERTE KONFIGURATION ANWENDEN"
     echo ""
+    cecho "$C_BCYAN" "  Effektiv: WM=${effective_wm} | Compositor=${CFG_COMPOSITOR} | Bar=${effective_bar} | Launcher=${CFG_LAUNCHER}"
+    show_custom_compatibility_warnings "$effective_wm" "$effective_bar"
+    echo ""
     cecho "$C_YELLOW" "  Folgende Komponenten werden konfiguriert:"
-    echo -e "  ${C_DIM}Window Manager:${C_RESET}  $CFG_WM"
+    echo -e "  ${C_DIM}Window Manager:${C_RESET}  $effective_wm"
     echo -e "  ${C_DIM}Compositor:${C_RESET}      $CFG_COMPOSITOR"
     echo -e "  ${C_DIM}Terminal:${C_RESET}        $CFG_TERMINAL"
-    echo -e "  ${C_DIM}Bar:${C_RESET}             $CFG_BAR"
+    echo -e "  ${C_DIM}Bar:${C_RESET}             $effective_bar"
     echo -e "  ${C_DIM}Launcher:${C_RESET}        $CFG_LAUNCHER"
-    echo -e "  ${C_DIM}GTK Theme:${C_RESET}       $CFG_GTK_THEME"
-    echo -e "  ${C_DIM}Icon Theme:${C_RESET}      $CFG_ICON_THEME"
+    echo -e "  ${C_DIM}GTK Theme:${C_RESET}       $effective_gtk_theme"
+    echo -e "  ${C_DIM}Icon Theme:${C_RESET}      $effective_icon_theme"
     echo -e "  ${C_DIM}Schrift:${C_RESET}         $CFG_FONT $CFG_FONT_SIZE"
     echo ""
 
@@ -1813,6 +1440,19 @@ apply_custom_config() {
 
     backup_current_setup
     install_custom_dependencies
+
+    # Window Manager installieren
+    case "$effective_wm" in
+        i3)        safe_install_packages i3-wm i3status i3lock i3blocks ;;
+        sway)      safe_install_packages sway swaybg swaylock waybar ;;
+        openbox)   safe_install_packages openbox obconf ;;
+        bspwm)     safe_install_packages bspwm sxhkd ;;
+        fluxbox)   safe_install_packages fluxbox ;;
+        dwm)       safe_install_packages dwm ;;
+        xmonad)    safe_install_packages xmonad ;;
+        hyprland)  safe_install_packages hyprland ;;
+        river)     safe_install_packages river ;;
+    esac
 
     # Compositor installieren
     if [[ "$CFG_COMPOSITOR" =~ ^(picom|compton|xcompmgr)$ ]]; then
@@ -1835,13 +1475,17 @@ apply_custom_config() {
         dmenu)      safe_install_packages suckless-tools ;;
         wofi)       safe_install_packages wofi ;;
         ulauncher)  safe_install_packages ulauncher ;;
+        albert)     safe_install_packages albert ;;
     esac
 
     # Bar installieren
-    case "$CFG_BAR" in
+    case "$effective_bar" in
         polybar)    safe_install_packages polybar ;;
         waybar)     safe_install_packages waybar ;;
         tint2)      safe_install_packages tint2 ;;
+        xfce4-panel) safe_install_packages xfce4-panel ;;
+        lxpanel)    safe_install_packages lxpanel ;;
+        i3bar)      safe_install_packages i3-wm i3status ;;
     esac
 
     # Dateimanager installieren
@@ -1851,6 +1495,7 @@ apply_custom_config() {
         dolphin)  safe_install_packages dolphin ;;
         nemo)     safe_install_packages nemo ;;
         ranger)   safe_install_packages ranger ;;
+        lf)       safe_install_packages lf ;;
         pcmanfm)  safe_install_packages pcmanfm ;;
     esac
 
@@ -1868,25 +1513,20 @@ apply_custom_config() {
         nitrogen)  safe_install_packages nitrogen ;;
         variety)   safe_install_packages variety ;;
         swaybg)    safe_install_packages swaybg ;;
+        xwallpaper) safe_install_packages xwallpaper ;;
     esac
 
     # Nerd Fonts installieren
     nerd_fonts_install
 
-    # Preset-Assets installieren, damit 'auto' und Override-Fälle konsistent bleiben.
-    themes_and_icons_install "$CFG_DESIGN" || true
+    # Basis-Assets für Themes/Icons bereitstellen.
+    install_visual_customization_assets || true
 
     # GTK Theme & Icons
-    if [ "$CFG_GTK_THEME" = "auto" ] || [ "$CFG_ICON_THEME" = "auto" ]; then
-        activate_themes_and_icons "$CFG_DESIGN" || true
-    fi
-    if [ "$CFG_GTK_THEME" != "auto" ]; then
-        if gsettings_available && [ -n "$CFG_GTK_THEME" ]; then
-            gsettings set org.gnome.desktop.interface gtk-theme "$CFG_GTK_THEME" 2>/dev/null || true
-        fi
-    fi
-    if gsettings_available && [ "$CFG_ICON_THEME" != "auto" ] && [ -n "$CFG_ICON_THEME" ]; then
-        gsettings set org.gnome.desktop.interface icon-theme "$CFG_ICON_THEME" 2>/dev/null || true
+    if gsettings_available; then
+        gsettings set org.gnome.desktop.interface gtk-theme "$effective_gtk_theme" 2>/dev/null || true
+        gsettings set org.gnome.desktop.interface icon-theme "$effective_icon_theme" 2>/dev/null || true
+        ensure_window_controls
     fi
 
     # Alacritty konfigurieren (mit gewählter Schrift)
@@ -1907,7 +1547,12 @@ EOF
     fi
 
     # i3/Sway konfigurieren
-    config_i3_or_sway "$CFG_DESIGN"
+    CFG_WM="$effective_wm"
+    CFG_BAR="$effective_bar"
+    CFG_GTK_THEME="$effective_gtk_theme"
+    CFG_ICON_THEME="$effective_icon_theme"
+    config_i3_or_sway
+    customize_desktop_environment
 
     # Compositor starten
     if [[ "$CFG_COMPOSITOR" =~ ^(picom|compton)$ ]] && command_exists "$CFG_COMPOSITOR"; then
@@ -1917,6 +1562,8 @@ EOF
     finetuning_and_optimizations
     manage_dot_files
     install_uv
+    save_settings
+    log_installation "custom-config" "WM=$CFG_WM, COMPOSITOR=$CFG_COMPOSITOR, TERMINAL=$CFG_TERMINAL, BAR=$CFG_BAR"
 
     cecho "$C_BGREEN" "\n  ✔ Benutzerdefinierte Konfiguration angewendet."
     cecho "$C_YELLOW" "  Bitte starte deine Sitzung neu, um alle Änderungen zu übernehmen."
@@ -1925,7 +1572,23 @@ EOF
 
 menu_custom_setup() {
     while true; do
+        local _effective_values=()
+        local effective_wm
+        local effective_bar
+        local effective_gtk_theme
+        local effective_icon_theme
+
+        mapfile -t _effective_values < <(resolve_effective_custom_values)
+        effective_wm="${_effective_values[0]}"
+        effective_bar="${_effective_values[1]}"
+        effective_gtk_theme="${_effective_values[2]}"
+        effective_icon_theme="${_effective_values[3]}"
+
         menu_header "BENUTZERDEFINIERTES SETUP"
+        echo ""
+        cecho "$C_DIM" "  Tipp: 'auto' bei WM/Bar wird passend zu $ENV_DISPLAY_SERVER aufgelöst."
+        cecho "$C_BCYAN" "  Effektiv: WM=${effective_wm} | Compositor=${CFG_COMPOSITOR} | Bar=${effective_bar} | GTK=${effective_gtk_theme} | Icons=${effective_icon_theme}"
+        show_custom_compatibility_warnings "$effective_wm" "$effective_bar"
         echo ""
         show_option "1"  "Window Manager      " "$CFG_WM"
         show_option "2"  "Compositor          " "$CFG_COMPOSITOR"
@@ -1974,9 +1637,6 @@ menu_tools() {
     while true; do
         menu_header "TOOLS VERWALTEN"
         echo ""
-        cecho "$C_YELLOW" "  ── Moderne Unix-Utilities (Enhanced UX) ──────────────"
-        show_option "0" "fzf / bat / ripgrep / delta       installieren"
-        echo ""
         cecho "$C_YELLOW" "  ── Systemüberwachung ───────────────────────────────"
         show_option "1" "btop / htop / glances / neofetch  installieren"
         echo ""
@@ -1995,14 +1655,12 @@ menu_tools() {
         cecho "$C_YELLOW" "  ── Wartung ─────────────────────────────────────────"
         show_option "8" "Systembereinigung (autoremove/clean)"
         show_option "9" "Dotfiles verwalten (git bare repo)"
-        show_option "10" "Installation-Report anzeigen"
         echo ""
         show_back
         echo ""
 
         local c; c=$(prompt_choice)
         case "$c" in
-            0) install_modern_unix_tools ; press_enter ;;
             1) install_system_monitoring_tools ; press_enter ;;
             2) audio_and_media_tools ; press_enter ;;
             3) brightness_control ; press_enter ;;
@@ -2012,7 +1670,7 @@ menu_tools() {
             7) install_uv ; press_enter ;;
             8) finetuning_and_optimizations ; press_enter ;;
             9) manage_dot_files ; press_enter ;;
-            10) show_installation_report ; press_enter ;;
+            0) break ;;
             *) error "Ungültige Auswahl." ; press_enter ;;
         esac
     done
@@ -2051,71 +1709,6 @@ menu_backup() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SCHNELL-SETUP MENÜ
-# ─────────────────────────────────────────────────────────────────────────────
-
-menu_quick_setup() {
-    menu_header "SCHNELL-SETUP – KALI MODES"
-    echo ""
-    cecho "$C_DIM" "  Wende einen vorgefertigten Kali Mode an."
-    cecho "$C_DIM" "  Alle Komponenten werden automatisch installiert und konfiguriert."
-    echo ""
-    
-    local modes=()
-    local mode_names=()
-    local mode_index=1
-    
-    # Load and display all available modes
-    while IFS= read -r mode; do
-        modes+=("$mode")
-        # Get mode name from conf file
-        local mode_name=$(grep "^MODE_NAME=" "$MODES_DIR/${mode}.conf" 2>/dev/null | cut -d'=' -f2 | tr -d '"')
-        local mode_desc=$(grep "^MODE_DESC=" "$MODES_DIR/${mode}.conf" 2>/dev/null | cut -d'=' -f2 | tr -d '"')
-        mode_names+=("$mode_name")
-        
-        local installed_marker=""
-        if is_mode_installed "$mode"; then
-            installed_marker=" ✔"
-        fi
-        
-        show_option "$mode_index" "$mode_name$installed_marker" "$mode_desc"
-        ((mode_index++))
-    done < <(list_kali_modes)
-    
-    echo ""
-    show_back
-    echo ""
-    cecho "$C_DIM" "  Aktueller Mode: $CFG_DESIGN"
-
-    local c; c=$(prompt_choice)
-    
-    if [ "$c" = "0" ]; then
-        return
-    fi
-    
-    # Check if choice is valid
-    if ! [[ "$c" =~ ^[0-9]+$ ]]; then
-        error "Ungültige Auswahl."
-        press_enter
-        return
-    fi
-    
-    if [ "$c" -lt 1 ] || [ "$c" -gt "${#modes[@]}" ]; then
-        error "Ungültige Auswahl."
-        press_enter
-        return
-    fi
-    
-    local selected_mode="${modes[$((c-1))]}"
-    
-    if confirm_action "Mode '$selected_mode' anwenden? (Backups werden erstellt)"; then
-        load_kali_mode "$selected_mode"
-        apply_design "$CFG_DESIGN"
-        press_enter
-    fi
-}
-
-# ─────────────────────────────────────────────────────────────────────────────
 # HAUPTMENÜ
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -2128,12 +1721,9 @@ ${C_BGREEN}╚══════════════════════
 ${C_BCYAN}GRUNDLEGENDE VERWENDUNG:${C_RESET}
   ./custom.sh                    # Interaktives Menü starten
 
-${C_BCYAN}KALI MODES (Vordefinierte Konfigurationen):${C_RESET}
-  ./custom.sh --mode <name>      # Mode laden: pentester, corporate, fsociety, xfce
-  ./custom.sh --list-modes       # Alle verfügbaren Modi anzeigen
-
-${C_BCYAN}DESIGNS (Theme-Presets):${C_RESET}
-  ./custom.sh --design <name>    # Design: minimalistic, corporate, windows_xp, fsocietyhub
+${C_BCYAN}INDIVIDUELLE CUSTOMIZATION:${C_RESET}
+    Konfiguration erfolgt Schritt für Schritt im interaktiven Menü.
+    Ziel: schnelle, performante und flexible "unix porn" Desktop-Anpassung auf Kali.
 
 ${C_BCYAN}SYSTEM VERWALTUNG:${C_RESET}
   ./custom.sh --status           # System-Status & Installation-Historie anzeigen
@@ -2146,19 +1736,17 @@ ${C_BCYAN}ERWEITERTE OPTIONEN:${C_RESET}
   ./custom.sh -h / --help        # Diese Hilfe anzeigen
 
 ${C_BCYAN}BEISPIELE:${C_RESET}
-  ./custom.sh --mode pentester          # Pentester-Mode + interaktives Menü
-  ./custom.sh --design fsocietyhub -v   # Design mit Verbose-Output
-  ./custom.sh --verbose --mode corporate # Corporate Mode mit Debug-Infos
-  ./custom.sh --dry-run --mode fsociety # Zeige was passieren würde
+    ./custom.sh                    # Interaktives Customization-Menü
+    ./custom.sh --status           # Aktuelle Konfiguration prüfen
+    ./custom.sh --dry-run          # Geplante Aktionen ohne Änderungen testen
 
 ${C_BCYAN}AUTOMATISIERUNG:${C_RESET}
-  VERBOSE=1 ./custom.sh --mode pentester    # ENV-Variable setzen
-  DRY_RUN=1 ./custom.sh --design corporate  # Testen ohne Änderungen
+    VERBOSE=1 ./custom.sh          # ENV-Variable setzen
+    DRY_RUN=1 ./custom.sh          # Testen ohne Änderungen
 
 ${C_BCYAN}DATEIEN & VERZEICHNISSE:${C_RESET}
   Konfiguration:    ~/.config/kali-desktop/settings.conf
   Installation Log: ~/.config/kali-desktop/install_report.log
-  Modes Definitionen: ~/.config/kali-desktop/modes/
   Backups:          ~/.desktop_backup/
 
 ${C_BCYAN}ANFORDERUNGEN:${C_RESET}
@@ -2180,11 +1768,10 @@ show_main_menu() {
     while true; do
         menu_header "KALI LINUX DESKTOP CONFIGURATOR"
         echo ""
-        show_option "1" "Schnell-Setup       " "Design-Preset in einem Schritt anwenden"
-        show_option "2" "Benutzerdefiniert   " "Jede Komponente einzeln konfigurieren"
-        show_option "3" "Status anzeigen     " "Umgebung & aktuelle Konfiguration"
-        show_option "4" "Backup / Restore    " "Einstellungen sichern oder wiederherstellen"
-        show_option "5" "Tools installieren  " "Systemtools, Fonts, Dev-Tools"
+        show_option "1" "Desktop konfigurieren" "Jede Komponente einzeln konfigurieren"
+        show_option "2" "Status anzeigen      " "Umgebung & aktuelle Konfiguration"
+        show_option "3" "Backup / Restore     " "Einstellungen sichern oder wiederherstellen"
+        show_option "4" "Tools installieren   " "Systemtools, Fonts, Dev-Tools"
         echo ""
         section_line
         show_option "0" "Beenden"
@@ -2192,11 +1779,10 @@ show_main_menu() {
 
         local c; c=$(prompt_choice)
         case "$c" in
-            1) menu_quick_setup ;;
-            2) menu_custom_setup ;;
-            3) show_status ;;
-            4) menu_backup ;;
-            5) menu_tools ;;
+            1) menu_custom_setup ;;
+            2) show_status ;;
+            3) menu_backup ;;
+            4) menu_tools ;;
             0) cecho "$C_DIM" "\n  Auf Wiedersehen." ; echo "" ; exit 0 ;;
             *) error "Ungültige Auswahl." ; press_enter ;;
         esac
@@ -2232,31 +1818,6 @@ show_installation_report() {
     press_enter
 }
 
-create_installation_summary() {
-    local mode="$1"
-    local duration="$2"
-    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    
-    menu_header "INSTALLATION ABGESCHLOSSEN"
-    echo ""
-    cecho "$C_BGREEN" "  ✔ Mode erfolgreich installiert!"
-    echo ""
-    cecho "$C_BCYAN" "  ── Details ───────────────────────────────────────────────"
-    echo -e "  ${C_DIM}Mode:${C_RESET}           $mode"
-    echo -e "  ${C_DIM}Zeitstempel:${C_RESET}    $timestamp"
-    echo -e "  ${C_DIM}Dauer:${C_RESET}          ${duration}s"
-    echo -e "  ${C_DIM}Report:${C_RESET}         $REPORT_FILE"
-    
-    echo ""
-    cecho "$C_YELLOW" "  Nächste Schritte:"
-    echo -e "  ${C_DIM}1. Starte deine Sitzung neu (Logout/Login)${C_RESET}"
-    echo -e "  ${C_DIM}2. Öffne eine neue Terminal-Sitzung${C_RESET}"
-    echo -e "  ${C_DIM}3. Starte ./custom.sh erneut für weitere Anpassungen${C_RESET}"
-    
-    echo ""
-    press_enter
-}
-
 # ─────────────────────────────────────────────────────────────────────────────
 # EINSTIEGSPUNKT
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2265,7 +1826,6 @@ main() {
     local start_time=$(date +%s)
     
     detect_environment
-    define_kali_modes
     load_settings
 
     if [ "$#" -gt 0 ]; then
@@ -2282,34 +1842,11 @@ main() {
                 shift
                 [ "$#" -gt 0 ] && "$@" || show_main_menu
                 ;;
-            --design)
-                if [ "$#" -lt 2 ]; then
-                    error "Fehlendes Design-Argument."
-                    exit 1
-                fi
-                apply_design "$2"
-                ;;
-            --mode)
-                if [ "$#" -lt 2 ]; then
-                    error "Fehlendes Mode-Argument."
-                    exit 1
-                fi
-                load_kali_mode "$2"
-                apply_design "$CFG_DESIGN"
-                ;;
             --restore)
                 restore_backup
                 ;;
             --status)
                 show_status
-                ;;
-            --list-modes)
-                echo "Verfügbare Kali Modes:"
-                while IFS= read -r mode; do
-                    local mode_name=$(grep "^MODE_NAME=" "$MODES_DIR/${mode}.conf" 2>/dev/null | cut -d'=' -f2 | tr -d '"')
-                    local mode_desc=$(grep "^MODE_DESC=" "$MODES_DIR/${mode}.conf" 2>/dev/null | cut -d'=' -f2 | tr -d '"')
-                    printf "  %-15s %s\n" "$mode" "$mode_desc"
-                done < <(list_kali_modes)
                 ;;
             --report)
                 show_installation_report
