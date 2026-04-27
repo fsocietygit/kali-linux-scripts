@@ -29,7 +29,7 @@ debug() {
     fi
 }
 
-success() {
+success() { 
     echo -e "${C_BGREEN}[✔]${C_RESET} $1"
 }
 
