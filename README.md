@@ -24,6 +24,7 @@ chmod +x custom.sh
 ./custom.sh
 ```
 
+![Custom Desktop](images/custom_desktop.png)
 
 ## License
 
