@@ -342,6 +342,23 @@ set_gsettings_theme() {
     fi
 }
 
+ensure_window_controls() {
+    # Stellt sicher, dass Schließen/Minimieren/Maximieren auch bei maximierten Fenstern sichtbar bleiben.
+    local layout=':minimize,maximize,close'
+
+    if ! gsettings_available; then
+        return 0
+    fi
+
+    if gsettings writable org.gnome.desktop.wm.preferences button-layout >/dev/null 2>&1; then
+        gsettings set org.gnome.desktop.wm.preferences button-layout "$layout" >/dev/null 2>&1 || true
+    fi
+
+    if gsettings writable org.gnome.desktop.interface gtk-decoration-layout >/dev/null 2>&1; then
+        gsettings set org.gnome.desktop.interface gtk-decoration-layout "$layout" >/dev/null 2>&1 || true
+    fi
+}
+
 apply_wallpaper() {
     local wallpaper_path="$1"
     local wallpaper_tool="${2:-${CFG_WALLPAPER_TOOL:-feh}}"
@@ -399,9 +416,9 @@ config_i3_or_sway() {
     if command_exists i3; then
         mkdir -p "$HOME/.config/i3"
         cat > "$HOME/.config/i3/config" <<EOF
-set $mod Mod4
+set \$mod Mod4
 font pango:${font_name} ${font_size}
-bindsym $mod+Return exec ${terminal_cmd}
+bindsym \$mod+Return exec ${terminal_cmd}
 exec --no-startup-id picom -b
 EOF
     fi
@@ -409,9 +426,9 @@ EOF
     if command_exists sway; then
         mkdir -p "$HOME/.config/sway"
         cat > "$HOME/.config/sway/config" <<EOF
-set $mod Mod4
+set \$mod Mod4
 font pango:${font_name} ${font_size}
-bindsym $mod+Return exec ${terminal_cmd}
+bindsym \$mod+Return exec ${terminal_cmd}
 EOF
         mkdir -p "$HOME/.config/waybar"
         cat > "$HOME/.config/waybar/config" <<'EOF'
@@ -1221,6 +1238,7 @@ menu_select_gtk_theme() {
     cecho "$C_BGREEN" "  ✔ GTK-Theme gesetzt: $CFG_GTK_THEME"
     if gsettings_available; then
         gsettings set org.gnome.desktop.interface gtk-theme "$CFG_GTK_THEME" 2>/dev/null || true
+        ensure_window_controls
     fi
     save_settings
     press_enter
@@ -1508,6 +1526,7 @@ apply_custom_config() {
     if gsettings_available; then
         gsettings set org.gnome.desktop.interface gtk-theme "$effective_gtk_theme" 2>/dev/null || true
         gsettings set org.gnome.desktop.interface icon-theme "$effective_icon_theme" 2>/dev/null || true
+        ensure_window_controls
     fi
 
     # Alacritty konfigurieren (mit gewählter Schrift)
